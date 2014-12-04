@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#3F51B5</color>
+    <color name="primary_dark">#303F9F</color>
+    <color name="textColorPrimary">#C5CAE9</color>
+    <color name="windowBackground">#EEEEEE</color>
+    <color name="colorBackground">#FFFFFF</color>
+    <color name="accent">#FF4081</color>
+    <color name="navigationBarColor">#3F51B5</color>
+    <color name="textColorSecondary">#000000</color>
+    <color name="textColorTertiary">#54000000</color>
+    <!-- start dark colors -->
+    <color name="darkprimary">#424242</color>
+    <color name="darkprimary_dark">#212121</color>
+    <color name="darktextColorPrimary">#FFFFFF</color>
+    <color name="darkwindowBackground">#616161</color>
+    <color name="darkcolorBackground">#757575</color>
+    <color name="darkaccent">#FF4081</color>
+    <color name="darknavigationBarColor">#60424242</color>
+    <color name="darktextColorSecondary">#E0E0E0</color>
+    <color name="darktextColorTertiary">#BDBDBD</color>
+</resources>
