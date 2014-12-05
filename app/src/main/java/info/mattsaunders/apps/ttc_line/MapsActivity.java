@@ -94,6 +94,9 @@ public class MapsActivity extends FragmentActivity implements
     private HashMap<String, Marker> visibleMarkersVehicle = new HashMap<String, Marker>();
     private HashMap<String, LatLng> visibleVehicleOldLocation = new HashMap<String, LatLng>();
 
+    //Visible route list:
+    private ArrayList<String> visibleRouteList = new ArrayList<String>();
+
     //Runnable vars for updating vehicle locations:
     private static Handler mHandler = new Handler();
     private static Runnable mViewUpdater;
@@ -387,6 +390,7 @@ public class MapsActivity extends FragmentActivity implements
             public void run() {
                 //Set apiParam2 to time:
                 apiParam2 = "&t=0";
+                ArrayList<String> tempRouteList = new ArrayList<String>();
                 while (loopVehicleInfo) {
                     System.out.println("Begin updating vehicle info:");
                     vehicleListBuilt = false;
@@ -394,8 +398,13 @@ public class MapsActivity extends FragmentActivity implements
                     //Perform connection, get data, update view:
                     //TODO: change routes here to only iterate through visible routes - for speed
                     //TODO: also ensure this gets executed when screen is moved, or fast enough for user to see info for new screen region
-                    for (TransitRoute route : routes) {
-                        apiParam1 = "&r=" + route.getRouteId();
+                    //for (TransitRoute route : routes) {
+                    tempRouteList.clear();
+                    tempRouteList = new ArrayList<String>(visibleRouteList);
+                    for (String id : tempRouteList) {
+                        //apiParam1 = "&r=" + route.getRouteId();
+                        System.out.println("Getting Vehicles on route: " + id);
+                        apiParam1 = "&r=" + id;
                         String urlString = apiURL + apiCommand + apiAgency + apiParam1 + apiParam2; // URL to call (url + command + agency tag + route tag + time (or 0))
                         BufferedInputStream in = null;
 
@@ -410,7 +419,7 @@ public class MapsActivity extends FragmentActivity implements
                             System.out.println(e.getMessage());
                             break;
                         }
-
+                        System.out.println("Got API info");
                         // Parse XML
                         XmlPullParserFactory pullParserFactory;
                         try {
@@ -453,6 +462,7 @@ public class MapsActivity extends FragmentActivity implements
     }
     private void displayStops() {
         float zoom = mMap.getCameraPosition().zoom;
+        visibleRouteList.clear();
         if (zoom > 14.5) {
             for (TransitRoute route : routes) {
                 stops = route.getStopsList();
@@ -466,6 +476,7 @@ public class MapsActivity extends FragmentActivity implements
                                             .icon(BitmapDescriptorFactory.fromResource(R.drawable.stop))
                             ));
                         }
+                        if (!visibleRouteList.contains(route.getRouteId())) { visibleRouteList.add(route.getRouteId()); }
                     } else if (visibleMarkers.containsKey(stop.getStopTag())) { //if not visible, check if already displayed
                         //System.out.println("Removing marker " + stop.getStopTitle() + " at " + stop.getLocation());
                         visibleMarkers.get(stop.getStopTag()).remove(); //remove marker from map
