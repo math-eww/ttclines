@@ -92,9 +92,11 @@ public class MapsActivity extends FragmentActivity implements
     //Marker list:
     private HashMap<String, Marker> visibleMarkers = new HashMap<String, Marker>();
     private HashMap<String, Marker> visibleMarkersVehicle = new HashMap<String, Marker>();
+    private HashMap<String, LatLng> visibleVehicleOldLocation = new HashMap<String, LatLng>();
 
     //Runnable vars for updating vehicle locations:
     private static Handler mHandler = new Handler();
+    private static Runnable mViewUpdater;
     private static Runnable mUpdater;
     private static boolean loopVehicleInfo = true;
     private static boolean vehicleListBuilt = false;
@@ -380,15 +382,18 @@ public class MapsActivity extends FragmentActivity implements
     }
 
     private void getVehicleUpdates() { //set API command before beginning to vehicleLocation
-        System.out.println("Begin updating vehicle info:");
         mUpdater = new Runnable() {
             @Override
             public void run() {
                 //Set apiParam2 to time:
                 apiParam2 = "&t=0";
                 while (loopVehicleInfo) {
+                    System.out.println("Begin updating vehicle info:");
+                    vehicleListBuilt = false;
                     vehicles.clear();
                     //Perform connection, get data, update view:
+                    //TODO: change routes here to only iterate through visible routes - for speed
+                    //TODO: also ensure this gets executed when screen is moved, or fast enough for user to see info for new screen region
                     for (TransitRoute route : routes) {
                         apiParam1 = "&r=" + route.getRouteId();
                         String urlString = apiURL + apiCommand + apiAgency + apiParam1 + apiParam2; // URL to call (url + command + agency tag + route tag + time (or 0))
@@ -403,6 +408,7 @@ public class MapsActivity extends FragmentActivity implements
                             System.out.println("FAILED TO RETRIEVE URL");
                             e.printStackTrace();
                             System.out.println(e.getMessage());
+                            break;
                         }
 
                         // Parse XML
@@ -425,6 +431,8 @@ public class MapsActivity extends FragmentActivity implements
                             e.printStackTrace();
                         }
                     }
+                    vehicleListBuilt = true;
+                    /*
                     for (TransitVehicle vehicle : vehicles) {
                         System.out.println("VEHICLE LOCATION: "
                                 + vehicle.getVehicleRoute()
@@ -432,36 +440,34 @@ public class MapsActivity extends FragmentActivity implements
                                 + " at " + vehicle.getLocation()
                                 + " last reported: " + vehicle.getSecSinceReport() + "s ago");
                     }
+                    */
                     System.out.println("Number of vehicles in list " + vehicles.size());
-                    vehicleListBuilt = true;
                     try {
-                        Thread.sleep(10000);
+                        Thread.sleep(5000);
                     } catch (InterruptedException e) {
                         e.printStackTrace();
                     }
-                    //mHandler.postDelayed(this, 5000); // set time here to refresh views
                 }
             }
         };
     }
     private void displayStops() {
         float zoom = mMap.getCameraPosition().zoom;
-        if (vehicleListBuilt) { displayVehicles(); }
         if (zoom > 14.5) {
             for (TransitRoute route : routes) {
                 stops = route.getStopsList();
                 for (TransitStop stop : stops) {
                     LatLng stopLoc = stop.getLocation();
                     if (bounds.contains(stopLoc)) {
-                        //TODO: change marker styling to something smaller and cleaner
-                        visibleMarkers.put(stop.getStopTag(), mMap.addMarker(new MarkerOptions()
-                                        .position(stopLoc)
-                                        .title(stop.getStopTitle())
-                                //.icon(BitmapDescriptorFactory.fromResource(R.drawable.bus))
-                        ));
+                        if (!visibleMarkers.containsKey(stop.getStopTag())) {
+                            visibleMarkers.put(stop.getStopTag(), mMap.addMarker(new MarkerOptions()
+                                            .position(stopLoc)
+                                            .title(stop.getStopTitle())
+                                            .icon(BitmapDescriptorFactory.fromResource(R.drawable.stop))
+                            ));
+                        }
                     } else if (visibleMarkers.containsKey(stop.getStopTag())) { //if not visible, check if already displayed
-                        //TODO: fix issue where some markers are not being removed properly
-                        System.out.println("Removing marker " + stop.getStopTitle() + " at " + stop.getLocation());
+                        //System.out.println("Removing marker " + stop.getStopTitle() + " at " + stop.getLocation());
                         visibleMarkers.get(stop.getStopTag()).remove(); //remove marker from map
                         visibleMarkers.remove(stop.getStopTag()); //remove marker from hash map of markers
                     }
@@ -472,20 +478,38 @@ public class MapsActivity extends FragmentActivity implements
 
     private void displayVehicles() {
         for (TransitVehicle vehicle : vehicles) {
-            LatLng stopLoc = vehicle.getLocation();
-            if (bounds.contains(stopLoc)) {
-                //TODO: change marker styling to something smaller and cleaner
-                visibleMarkersVehicle.put(vehicle.getId(), mMap.addMarker(new MarkerOptions()
-                                .position(stopLoc)
-                                .title(vehicle.getVehicleRoute())
-                                .icon(BitmapDescriptorFactory.fromResource(R.drawable.bus))
-                ));
+            LatLng vehLoc = vehicle.getLocation();
+            if (bounds.contains(vehLoc)) {
+                if (!visibleMarkersVehicle.containsKey(vehicle.getId())) {
+                    visibleMarkersVehicle.put(vehicle.getId(), mMap.addMarker(new MarkerOptions()
+                                    .position(vehLoc)
+                                    .title(vehicle.getVehicleRoute() + " - " + vehicle.getId())
+                                    .icon(BitmapDescriptorFactory.fromResource(R.drawable.bus))
+                    ));
+                    visibleVehicleOldLocation.put(vehicle.getId(), vehLoc);
+                } else if (!vehLoc.equals(visibleVehicleOldLocation.get(vehicle.getId()))) {   //check if vehicle has moved since last time, but is still on screen.
+                    System.out.println("VEHICLE MOVED: " + vehicle.getVehicleRoute() + " " + vehicle.getId() + " from " + visibleVehicleOldLocation.get(vehicle.getId()) + " to " + vehicle.getLocation());
+                    visibleVehicleOldLocation.put(vehicle.getId(), vehLoc);
+                    visibleMarkersVehicle.get(vehicle.getId()).setPosition(vehLoc);
+                }
             } else if (visibleMarkersVehicle.containsKey(vehicle.getId())) { //if not visible, check if already displayed
-                //TODO: fix issue where some markers are not being removed properly
+                System.out.println("Removing vehicle marker " + vehicle.getId() + ":" + vehicle.getVehicleRoute() + " at " + vehicle.getLocation());
                 visibleMarkersVehicle.get(vehicle.getId()).remove(); //remove marker from map
                 visibleMarkersVehicle.remove(vehicle.getId()); //remove marker from hash map of markers
+
             }
         }
+    }
+
+    private void updateVehicleView() {
+        mViewUpdater = new Runnable() {
+            @Override
+            public void run() {
+                mHandler.postDelayed(this, 1000);
+                if (vehicleListBuilt) {
+                    displayVehicles(); }
+            }
+        };
     }
 
     /**
@@ -532,12 +556,17 @@ public class MapsActivity extends FragmentActivity implements
                 getRoutes(); //Get route info
             }
             mMap.setMyLocationEnabled(true);
+            bounds = mMap.getProjection().getVisibleRegion().latLngBounds;
             mMap.setOnCameraChangeListener(new GoogleMap.OnCameraChangeListener() {
                 @Override
                 public void onCameraChange(CameraPosition position) {
                     bounds = mMap.getProjection().getVisibleRegion().latLngBounds;
-                    Log.i("Camera bounds", "Area shown " + bounds.toString());
+                    //Log.i("Camera bounds", "Area shown " + bounds.toString());
                     if (gotRouteInfo) {
+                        if (vehicleListBuilt) { displayVehicles(); }
+                        //mMap.clear();
+                        //visibleMarkersVehicle.clear();
+                        //visibleMarkers.clear();
                         displayStops();
                     }
                 }
@@ -546,6 +575,8 @@ public class MapsActivity extends FragmentActivity implements
             getVehicleUpdates();
             Thread t= new Thread(mUpdater);
             t.start();
+            updateVehicleView();
+            mHandler.post(mViewUpdater);
         }
     }
 

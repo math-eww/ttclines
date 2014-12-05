@@ -27,7 +27,8 @@
 
         <activity
             android:name="info.mattsaunders.apps.ttc_line.MapsActivity"
-            android:label="@string/title_activity_maps" >
+            android:label="@string/title_activity_maps"
+            android:screenOrientation="portrait" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
