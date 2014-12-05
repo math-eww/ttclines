@@ -229,15 +229,23 @@ public class MapsActivity extends FragmentActivity implements
             String urlString = params[0]; // URL to call
             String command = params[1]; //Which command is being executed
             String resultToDisplay = "";
-            InputStream in = null;
+            BufferedInputStream in = null;
+            HttpURLConnection urlConnection;
+            InputStream input;
 
             Log.i("Executing background API task", "Command is " + command);
 
             // HTTP Get
             try {
                 URL url = new URL(urlString);
-                HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection();
-                in = new BufferedInputStream(urlConnection.getInputStream()); //API result
+                urlConnection = (HttpURLConnection) url.openConnection();
+                input = urlConnection.getInputStream(); //API result
+                //Save route list XML file:
+                Utilities.writeXMLFile(input);
+                //Now load the data we just saved:
+                //in = new BufferedInputStream(input);
+                in = Utilities.readXMLFile();
+
             } catch (Exception e) {
                 System.out.println(e.getMessage());
                 return e.getMessage();
@@ -265,8 +273,12 @@ public class MapsActivity extends FragmentActivity implements
 
                     try {
                         URL url = new URL(urlString);
-                        HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection();
-                        in = new BufferedInputStream(urlConnection.getInputStream()); //API result
+                        urlConnection = (HttpURLConnection) url.openConnection();
+                        input = urlConnection.getInputStream(); //API result
+                        //Save stops list XML file:
+                        Utilities.FILENAME_EXT = "_" + route.getRouteId();
+                        Utilities.writeXMLFile(input);
+                        in = Utilities.readXMLFile();
                     } catch (Exception e) {
                         System.out.println(e.getMessage());
                         return e.getMessage();
@@ -309,6 +321,7 @@ public class MapsActivity extends FragmentActivity implements
             stops = route.getStopsList();
             for (TransitStop stop : stops) {
                 LatLng stopLoc = stop.getLocation();
+                //TODO: remove marker if not in bounds
                 if (bounds.contains(stopLoc)){
                     //TODO: change marker styling to something smaller and cleaner
                     mMap.addMarker(new MarkerOptions().position(stopLoc).title(stop.getStopTitle()));
@@ -355,11 +368,10 @@ public class MapsActivity extends FragmentActivity implements
         if (servicesConnected()) {
             Log.i("Services Connected ", "TRUE");
 
-            //Get list of routes
             //TODO: if check for saved info - download if it doesn't exist
             //TODO: save info from storage on first run or update
             //TODO: UI settings page, give user option to refresh data
-            getRoutes();
+            getRoutes(); //Get route info
 
             mMap.setOnCameraChangeListener(new GoogleMap.OnCameraChangeListener() {
                 @Override
