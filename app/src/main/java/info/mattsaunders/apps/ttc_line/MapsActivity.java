@@ -8,6 +8,7 @@ import android.content.IntentSender;
 import android.content.SharedPreferences;
 import android.location.Location;
 import android.os.AsyncTask;
+import android.os.Handler;
 import android.support.v4.app.DialogFragment;
 import android.support.v4.app.FragmentActivity;
 import android.os.Bundle;
@@ -23,9 +24,11 @@ import com.google.android.gms.location.LocationListener;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.SupportMapFragment;
+import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.CameraPosition;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.LatLngBounds;
+import com.google.android.gms.maps.model.Marker;
 import com.google.android.gms.maps.model.MarkerOptions;
 
 import org.xmlpull.v1.XmlPullParser;
@@ -38,6 +41,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.HashMap;
 
 public class MapsActivity extends FragmentActivity implements
         GooglePlayServicesClient.ConnectionCallbacks,
@@ -56,7 +60,7 @@ public class MapsActivity extends FragmentActivity implements
     //TTC info
     ArrayList<TransitRoute> routes = null;
     ArrayList<TransitStop> stops = null;
-    ArrayList<TransitVehicle> vehicles = null;
+    ArrayList<TransitVehicle> vehicles = new ArrayList<TransitVehicle>();
 
     private GoogleMap mMap; // Might be null if Google Play services APK is not available.
     private SharedPreferences mPrefs;
@@ -83,7 +87,17 @@ public class MapsActivity extends FragmentActivity implements
     public String apiCommand;
     public String apiParam1; //store routeID value for api call
     public String apiParam2; //store time value for api call
-    private boolean gotRouteInfo = false;
+    public static boolean gotRouteInfo = false;
+
+    //Marker list:
+    private HashMap<String, Marker> visibleMarkers = new HashMap<String, Marker>();
+    private HashMap<String, Marker> visibleMarkersVehicle = new HashMap<String, Marker>();
+
+    //Runnable vars for updating vehicle locations:
+    private static Handler mHandler = new Handler();
+    private static Runnable mUpdater;
+    private static boolean loopVehicleInfo = true;
+    private static boolean vehicleListBuilt = false;
 
     @Override
     protected void onStart() {
@@ -163,7 +177,56 @@ public class MapsActivity extends FragmentActivity implements
         String urlString = apiURL + apiCommand + apiAgency;
         new CallAPI().execute(urlString,"routeList");
     }
+    private ArrayList<TransitVehicle> parseVehicleList(XmlPullParser parser) throws XmlPullParserException, IOException {
+        int eventType = parser.getEventType();
+        ArrayList<TransitVehicle> result = new ArrayList<TransitVehicle>();
+        while( eventType!= XmlPullParser.END_DOCUMENT) {
+            String name = null;
+            switch(eventType)
+            {
+                case XmlPullParser.START_TAG:
+                    name = parser.getName();
+                    if( name.equals("Error")) {
+                        System.out.println("Web API Error!");
+                        System.out.println(parser.getAttributeValue(0));
+                    }
+                    else if ( name.equals("vehicle")) {
+                        if (parser.getAttributeCount() > 3) {
+                            //create new transit vehicle object
+                            //check attributes:
+                            String vehicleRouteId = "";
+                            String vehicleId = "";
+                            double lat = 0;
+                            double lng = 0;
+                            int sec = 0;
+                            for (int x = 0; x < parser.getAttributeCount(); x++){
+                                if (parser.getAttributeName(x).equals("id")) {
+                                    vehicleId = parser.getAttributeValue(x);
+                                } else if (parser.getAttributeName(x).equals("routeTag")) {
+                                    vehicleRouteId = parser.getAttributeValue(x);
+                                } else if (parser.getAttributeName(x).equals("lat")) {
+                                    lat = Double.parseDouble(parser.getAttributeValue(x));
+                                } else if (parser.getAttributeName(x).equals("lon")) {
+                                    lng = Double.parseDouble(parser.getAttributeValue(x));
+                                } else if (parser.getAttributeName(x).equals("secsSinceReport")) {
+                                    sec = Integer.parseInt(parser.getAttributeValue(x));
+                                }
 
+                            }
+                            TransitVehicle tempVehicle = new TransitVehicle(vehicleId, vehicleRouteId, new LatLng(lat,lng), sec); //subway stations don't have this one---parser.getAttributeValue(4)
+
+                            //add new transit vehicle object to list
+                            result.add(tempVehicle);
+                        }
+                    }
+                    break;
+                case XmlPullParser.END_TAG:
+                    break;
+            } // end switch
+            eventType = parser.next();
+        } // end while
+        return result;
+    }
     private ArrayList<TransitRoute> parseRouteList(XmlPullParser parser) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
         ArrayList<TransitRoute> result = new ArrayList<TransitRoute>();
@@ -316,16 +379,111 @@ public class MapsActivity extends FragmentActivity implements
         }
     }
 
-    private void displayStops() {
-        for (TransitRoute route : routes) {
-            stops = route.getStopsList();
-            for (TransitStop stop : stops) {
-                LatLng stopLoc = stop.getLocation();
-                //TODO: remove marker if not in bounds
-                if (bounds.contains(stopLoc)){
-                    //TODO: change marker styling to something smaller and cleaner
-                    mMap.addMarker(new MarkerOptions().position(stopLoc).title(stop.getStopTitle()));
+    private void getVehicleUpdates() { //set API command before beginning to vehicleLocation
+        System.out.println("Begin updating vehicle info:");
+        mUpdater = new Runnable() {
+            @Override
+            public void run() {
+                //Set apiParam2 to time:
+                apiParam2 = "&t=0";
+                while (loopVehicleInfo) {
+                    vehicles.clear();
+                    //Perform connection, get data, update view:
+                    for (TransitRoute route : routes) {
+                        apiParam1 = "&r=" + route.getRouteId();
+                        String urlString = apiURL + apiCommand + apiAgency + apiParam1 + apiParam2; // URL to call (url + command + agency tag + route tag + time (or 0))
+                        BufferedInputStream in = null;
+
+                        // HTTP Get
+                        try {
+                            URL url = new URL(urlString);
+                            HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection(); //API result
+                            in = new BufferedInputStream(urlConnection.getInputStream());
+                        } catch (Exception e) {
+                            System.out.println("FAILED TO RETRIEVE URL");
+                            e.printStackTrace();
+                            System.out.println(e.getMessage());
+                        }
+
+                        // Parse XML
+                        XmlPullParserFactory pullParserFactory;
+                        try {
+                            pullParserFactory = XmlPullParserFactory.newInstance();
+                            XmlPullParser parser = pullParserFactory.newPullParser();
+
+                            parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false);
+                            parser.setInput(in, null);
+
+                            //Process data from vehicleLocation command:
+                            ArrayList<TransitVehicle> tempVehicles = parseVehicleList(parser);
+                            for (TransitVehicle vehicle : tempVehicles) {
+                                vehicles.add(vehicle);
+                            }
+                        } catch (XmlPullParserException e) {
+                            e.printStackTrace();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                    for (TransitVehicle vehicle : vehicles) {
+                        System.out.println("VEHICLE LOCATION: "
+                                + vehicle.getVehicleRoute()
+                                + " ID#" + vehicle.getId()
+                                + " at " + vehicle.getLocation()
+                                + " last reported: " + vehicle.getSecSinceReport() + "s ago");
+                    }
+                    System.out.println("Number of vehicles in list " + vehicles.size());
+                    vehicleListBuilt = true;
+                    try {
+                        Thread.sleep(10000);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    //mHandler.postDelayed(this, 5000); // set time here to refresh views
                 }
+            }
+        };
+    }
+    private void displayStops() {
+        float zoom = mMap.getCameraPosition().zoom;
+        if (vehicleListBuilt) { displayVehicles(); }
+        if (zoom > 14.5) {
+            for (TransitRoute route : routes) {
+                stops = route.getStopsList();
+                for (TransitStop stop : stops) {
+                    LatLng stopLoc = stop.getLocation();
+                    if (bounds.contains(stopLoc)) {
+                        //TODO: change marker styling to something smaller and cleaner
+                        visibleMarkers.put(stop.getStopTag(), mMap.addMarker(new MarkerOptions()
+                                        .position(stopLoc)
+                                        .title(stop.getStopTitle())
+                                //.icon(BitmapDescriptorFactory.fromResource(R.drawable.bus))
+                        ));
+                    } else if (visibleMarkers.containsKey(stop.getStopTag())) { //if not visible, check if already displayed
+                        //TODO: fix issue where some markers are not being removed properly
+                        System.out.println("Removing marker " + stop.getStopTitle() + " at " + stop.getLocation());
+                        visibleMarkers.get(stop.getStopTag()).remove(); //remove marker from map
+                        visibleMarkers.remove(stop.getStopTag()); //remove marker from hash map of markers
+                    }
+                }
+            }
+        } else { mMap.clear(); }
+    }
+
+    private void displayVehicles() {
+        for (TransitVehicle vehicle : vehicles) {
+            LatLng stopLoc = vehicle.getLocation();
+            if (bounds.contains(stopLoc)) {
+                //TODO: change marker styling to something smaller and cleaner
+                visibleMarkersVehicle.put(vehicle.getId(), mMap.addMarker(new MarkerOptions()
+                                .position(stopLoc)
+                                .title(vehicle.getVehicleRoute())
+                                .icon(BitmapDescriptorFactory.fromResource(R.drawable.bus))
+                ));
+            } else if (visibleMarkersVehicle.containsKey(vehicle.getId())) { //if not visible, check if already displayed
+                //TODO: fix issue where some markers are not being removed properly
+                visibleMarkersVehicle.get(vehicle.getId()).remove(); //remove marker from map
+                visibleMarkersVehicle.remove(vehicle.getId()); //remove marker from hash map of markers
             }
         }
     }
@@ -367,12 +525,13 @@ public class MapsActivity extends FragmentActivity implements
     private void setUpMap() {
         if (servicesConnected()) {
             Log.i("Services Connected ", "TRUE");
-
-            //TODO: if check for saved info - download if it doesn't exist
-            //TODO: save info from storage on first run or update
             //TODO: UI settings page, give user option to refresh data
-            getRoutes(); //Get route info
-
+            if (Utilities.checkXMLFile()) {
+                routes = Utilities.parseSavedXML();
+            } else {
+                getRoutes(); //Get route info
+            }
+            mMap.setMyLocationEnabled(true);
             mMap.setOnCameraChangeListener(new GoogleMap.OnCameraChangeListener() {
                 @Override
                 public void onCameraChange(CameraPosition position) {
@@ -383,15 +542,16 @@ public class MapsActivity extends FragmentActivity implements
                     }
                 }
             });
+            apiCommand = "vehicleLocations";
+            getVehicleUpdates();
+            Thread t= new Thread(mUpdater);
+            t.start();
         }
     }
 
     private void updateMap() {
         //Store current location
         mCurrentLocation = mLocationClient.getLastLocation();
-        //Add market to current location
-        mMap.addMarker(new MarkerOptions().position(new LatLng(mCurrentLocation.getLatitude(), mCurrentLocation.getLongitude())).title("You"));
-        //Move camera to current location:
         //Build LatLng object to store current user location:
         userLocation = new LatLng (mCurrentLocation.getLatitude(), mCurrentLocation.getLongitude());
         // Construct a CameraPosition focusing on userLocation and animate the camera to that position.
@@ -401,6 +561,7 @@ public class MapsActivity extends FragmentActivity implements
                 .bearing(0)                 // Sets the orientation of the camera to east
                 .tilt(30)                   // Sets the tilt of the camera to 30 degrees
                 .build();                   // Creates a CameraPosition from the builder
+        //Move camera to current location:
         mMap.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition));
         bounds = mMap.getProjection().getVisibleRegion().latLngBounds;
     }

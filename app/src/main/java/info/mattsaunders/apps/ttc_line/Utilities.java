@@ -26,7 +26,7 @@ public class Utilities {
     public final static String FILENAME = "Route_info";
     public static String FILENAME_EXT = "";
 
-    public ArrayList<TransitRoute> parseSavedXML() {
+    public static ArrayList<TransitRoute> parseSavedXML() {
         //Open saved XML file:
         FILENAME_EXT = "";
         BufferedInputStream in = readXMLFile();
@@ -47,7 +47,7 @@ public class Utilities {
             System.out.println("----------------Built route list---------------");
             System.out.println("--------------Building stops list--------------");
             for (TransitRoute route : results) {
-                System.out.println("Getting stops on " + route.getRouteId() + " " + route.getRouteName());
+                System.out.println("Loading stops on " + route.getRouteId() + " " + route.getRouteName());
 
                 //Open file input stream of local XML file for route stops
                 FILENAME_EXT = "_" + route.getRouteId();
@@ -75,9 +75,10 @@ public class Utilities {
         } catch (IOException e) {
             e.printStackTrace();
         }
+        MapsActivity.gotRouteInfo = true;
         return results;
     }
-    private ArrayList<TransitRoute> parseRouteList(XmlPullParser parser) throws XmlPullParserException, IOException {
+    private static ArrayList<TransitRoute> parseRouteList(XmlPullParser parser) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
         ArrayList<TransitRoute> result = new ArrayList<TransitRoute>();
         while( eventType!= XmlPullParser.END_DOCUMENT) {
@@ -103,7 +104,7 @@ public class Utilities {
         } // end while
         return result;
     }
-    private ArrayList<TransitStop> parseStopList(XmlPullParser parser) throws XmlPullParserException, IOException {
+    private static ArrayList<TransitStop> parseStopList(XmlPullParser parser) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
         ArrayList<TransitStop> result = new ArrayList<TransitStop>();
         while( eventType!= XmlPullParser.END_DOCUMENT) {
@@ -172,6 +173,16 @@ public class Utilities {
         Log.e("Failed to find directory", ex.toString());
     }
     return null;
+    }
+    public static boolean checkXMLFile() {
+        File sdcard = Environment.getExternalStorageDirectory();
+        File dir = new File(sdcard.getAbsolutePath() + FILEDIR);
+        File file = new File(dir, FILENAME + FILENAME_EXT);
+        if(file.exists()) {
+            return true;
+        } else {
+            return false;
+        }
     }
 
     /*

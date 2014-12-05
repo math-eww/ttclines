@@ -6,23 +6,26 @@ import com.google.android.gms.maps.model.LatLng;
  * Transit Vehicle object
  */
 public class TransitVehicle {
-    private String name;
-    private int id;
+    private String id;
+    private String routeTag;
     private LatLng location;
+    private int secSinceReport;
 
-    public TransitVehicle(String name, int id, LatLng location) {
-        this.name = name;
+    public TransitVehicle(String id, String routeTag, LatLng location, int secSinceReport) {
         this.id = id;
+        this.routeTag = routeTag;
         this.location = location;
+        this.secSinceReport = secSinceReport;
     }
 
-    public String getVehicleName(){
-        return name;
+    public String getVehicleRoute(){
+        return routeTag;
     }
-    public int getId(){
+    public String getId(){
         return id;
     }
     public LatLng getLocation(){
         return location;
     }
+    public int getSecSinceReport() { return secSinceReport; }
 }
