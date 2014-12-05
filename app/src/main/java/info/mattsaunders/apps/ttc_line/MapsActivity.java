@@ -396,8 +396,6 @@ public class MapsActivity extends FragmentActivity implements
                     vehicleListBuilt = false;
                     vehicles.clear();
                     //Perform connection, get data, update view:
-                    //TODO: change routes here to only iterate through visible routes - for speed
-                    //TODO: also ensure this gets executed when screen is moved, or fast enough for user to see info for new screen region
                     //for (TransitRoute route : routes) {
                     tempRouteList.clear();
                     tempRouteList = new ArrayList<String>(visibleRouteList);
