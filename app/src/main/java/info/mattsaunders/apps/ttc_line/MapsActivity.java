@@ -6,13 +6,17 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentSender;
 import android.content.SharedPreferences;
+import android.graphics.Point;
 import android.location.Location;
 import android.os.AsyncTask;
 import android.os.Handler;
+import android.os.SystemClock;
 import android.support.v4.app.DialogFragment;
 import android.support.v4.app.FragmentActivity;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.animation.Interpolator;
+import android.view.animation.LinearInterpolator;
 import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
@@ -23,6 +27,7 @@ import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationListener;
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
+import com.google.android.gms.maps.Projection;
 import com.google.android.gms.maps.SupportMapFragment;
 import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.CameraPosition;
@@ -47,6 +52,19 @@ public class MapsActivity extends FragmentActivity implements
         GooglePlayServicesClient.ConnectionCallbacks,
         GooglePlayServicesClient.OnConnectionFailedListener,
         LocationListener {
+
+    /**QA and stability:
+     * TODO: test crash when location isn't enabled
+     * TODO: test crash if wifi isn't enabled - something like that seems like it might be happening
+     * TODO: QA testing for other possible crash scenarios
+     * Features:
+     * TODO: when click on stop, show predictions for next vehicle for each line that serves that stop
+     * TODO: show vehicle direction in image - with arrow maybe?
+     * TODO: change vehicle marker color if vehicle has not moved much over time - ie turn vehicle marker red if vehicle appears to be stuck somewhere
+     * TODO: activity to list nearby stops and predictions for next vehicles
+     * TODO: attempt to determine if user is on a streetcar/bus, and present user with list of predicted times of arrival for upcoming stops
+     * TODO: visual indicator in UI for user to know how the refreshing of info is going - spinner maybe?
+     */
 
     // Global variables
     Location mCurrentLocation;
@@ -101,8 +119,10 @@ public class MapsActivity extends FragmentActivity implements
     private static Handler mHandler = new Handler();
     private static Runnable mViewUpdater;
     private static Runnable mUpdater;
+    private Thread t;
     private static boolean loopVehicleInfo = true;
     private static boolean vehicleListBuilt = false;
+    private static int sleepTime = 3000;
 
     @Override
     protected void onStart() {
@@ -113,6 +133,8 @@ public class MapsActivity extends FragmentActivity implements
 
     @Override
     protected void onPause() {
+        loopVehicleInfo = false;
+        t.interrupt();
         // Save the current setting for updates
         mEditor.putBoolean("KEY_UPDATES_ON", mUpdatesRequested);
         mEditor.commit();
@@ -161,7 +183,6 @@ public class MapsActivity extends FragmentActivity implements
     protected void onResume() {
         super.onResume();
         setUpMapIfNeeded();
-
         /*
          * Get any previous setting for location updates
          * Gets "false" if an error occurs
@@ -449,10 +470,12 @@ public class MapsActivity extends FragmentActivity implements
                     }
                     */
                     System.out.println("Number of vehicles in list " + vehicles.size());
+                    if (!loopVehicleInfo) { return; }
                     try {
-                        Thread.sleep(5000);
+                        Thread.sleep(sleepTime);
                     } catch (InterruptedException e) {
                         e.printStackTrace();
+                        return;
                     }
                 }
             }
@@ -470,7 +493,7 @@ public class MapsActivity extends FragmentActivity implements
                         if (!visibleMarkers.containsKey(stop.getStopTag())) {
                             visibleMarkers.put(stop.getStopTag(), mMap.addMarker(new MarkerOptions()
                                             .position(stopLoc)
-                                            .title(stop.getStopTitle())
+                                            .title(stop.getStopTitle() + " ID tag: " + stop.getStopTag())
                                             .icon(BitmapDescriptorFactory.fromResource(R.drawable.stop))
                             ));
                         }
@@ -484,7 +507,6 @@ public class MapsActivity extends FragmentActivity implements
             }
         } else { mMap.clear(); }
     }
-
     private void displayVehicles() {
         for (TransitVehicle vehicle : vehicles) {
             LatLng vehLoc = vehicle.getLocation();
@@ -499,7 +521,8 @@ public class MapsActivity extends FragmentActivity implements
                 } else if (!vehLoc.equals(visibleVehicleOldLocation.get(vehicle.getId()))) {   //check if vehicle has moved since last time, but is still on screen.
                     System.out.println("VEHICLE MOVED: " + vehicle.getVehicleRoute() + " " + vehicle.getId() + " from " + visibleVehicleOldLocation.get(vehicle.getId()) + " to " + vehicle.getLocation());
                     visibleVehicleOldLocation.put(vehicle.getId(), vehLoc);
-                    visibleMarkersVehicle.get(vehicle.getId()).setPosition(vehLoc);
+                    //visibleMarkersVehicle.get(vehicle.getId()).setPosition(vehLoc);
+                    animateMarker(visibleMarkersVehicle.get(vehicle.getId()), vehLoc, false);
                 }
             } else if (visibleMarkersVehicle.containsKey(vehicle.getId())) { //if not visible, check if already displayed
                 System.out.println("Removing vehicle marker " + vehicle.getId() + ":" + vehicle.getVehicleRoute() + " at " + vehicle.getLocation());
@@ -510,13 +533,54 @@ public class MapsActivity extends FragmentActivity implements
         }
     }
 
+    public void animateMarker(final Marker marker, final LatLng toPosition,
+                              final boolean hideMarker) {
+        final Handler handler = new Handler();
+        final long start = SystemClock.uptimeMillis();
+        Projection proj = mMap.getProjection();
+        Point startPoint = proj.toScreenLocation(marker.getPosition());
+        final LatLng startLatLng = proj.fromScreenLocation(startPoint);
+        final long duration = 500;
+
+        final Interpolator interpolator = new LinearInterpolator();
+
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                long elapsed = SystemClock.uptimeMillis() - start;
+                float t = interpolator.getInterpolation((float) elapsed
+                        / duration);
+                double lng = t * toPosition.longitude + (1 - t)
+                        * startLatLng.longitude;
+                double lat = t * toPosition.latitude + (1 - t)
+                        * startLatLng.latitude;
+                marker.setPosition(new LatLng(lat, lng));
+
+                if (t < 1.0) {
+                    // Post again 16ms later.
+                    handler.postDelayed(this, 16);
+                } else {
+                    if (hideMarker) {
+                        marker.setVisible(false);
+                    } else {
+                        marker.setVisible(true);
+                    }
+                }
+            }
+        });
+    }
+
     private void updateVehicleView() {
+        //TODO: fix - more than one instance of this runs - if user closes and immediately reopens app, it's possible for this to stop altogether
         mViewUpdater = new Runnable() {
             @Override
             public void run() {
-                mHandler.postDelayed(this, 1000);
+                System.out.println("UPDATING VEHICLE VIEW!");
+                if (!loopVehicleInfo) { return; }
+                mHandler.postDelayed(this, sleepTime / 2);
                 if (vehicleListBuilt) {
-                    displayVehicles(); }
+                    displayVehicles();
+                }
             }
         };
     }
@@ -546,6 +610,16 @@ public class MapsActivity extends FragmentActivity implements
             if (mMap != null) {
                 setUpMap();
             }
+        }
+        if (!t.isAlive()) {
+            //TODO: Sanity checking = this fails if user immediately reopens app - partially fixed? using t.interrupt()
+            loopVehicleInfo = true;
+            apiCommand = "vehicleLocations";
+            getVehicleUpdates();
+            t= new Thread(mUpdater);
+            t.start();
+            updateVehicleView();
+            mHandler.post(mViewUpdater);
         }
     }
 
@@ -580,9 +654,22 @@ public class MapsActivity extends FragmentActivity implements
                     }
                 }
             });
+            mMap.setOnMarkerClickListener(new GoogleMap.OnMarkerClickListener()
+            {
+                @Override
+                public boolean onMarkerClick(com.google.android.gms.maps.model.Marker marker)
+                {
+                    marker.showInfoWindow();
+                    if (visibleMarkers.containsValue(marker)) {
+                        String key = Utilities.getKeyFromValue(marker, visibleMarkers);
+                        System.out.println("MARKER CLICKED! " + marker.getId() + " " + marker.getTitle() + " = stop id: " + key);
+                    }
+                    return true;
+                }
+            });
             apiCommand = "vehicleLocations";
             getVehicleUpdates();
-            Thread t= new Thread(mUpdater);
+            t= new Thread(mUpdater);
             t.start();
             updateVehicleView();
             mHandler.post(mViewUpdater);

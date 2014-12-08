@@ -4,6 +4,7 @@ import android.os.Environment;
 import android.util.Log;
 
 import com.google.android.gms.maps.model.LatLng;
+import com.google.android.gms.maps.model.Marker;
 
 import org.xmlpull.v1.XmlPullParser;
 import org.xmlpull.v1.XmlPullParserException;
@@ -17,6 +18,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.HashMap;
 
 /**
  * File utilities to store and retrieve info, stored in JSON files
@@ -178,11 +180,16 @@ public class Utilities {
         File sdcard = Environment.getExternalStorageDirectory();
         File dir = new File(sdcard.getAbsolutePath() + FILEDIR);
         File file = new File(dir, FILENAME + FILENAME_EXT);
-        if(file.exists()) {
-            return true;
-        } else {
-            return false;
+        return file.exists();
+    }
+
+    public static String getKeyFromValue (Marker marker, HashMap<String, Marker> hm) {
+        for (String key : hm.keySet()) {
+            if (hm.get(key).equals(marker)) {
+                return key;
+            }
         }
+        return null;
     }
 
     /*
