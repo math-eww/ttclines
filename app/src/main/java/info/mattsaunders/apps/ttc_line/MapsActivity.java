@@ -60,14 +60,22 @@ public class MapsActivity extends FragmentActivity implements
         LocationListener {
 
     /**QA and stability:
+     * TODO: PRIORITY - after being open a while (possible other causes) - vehicle updating loop fails to continue - gets stuck after "Getting Vehicles on route: ##"
+     * --- seems to be a timeout thing - maybe the timeout length is too long? maybe use setConnectionTimeout - problem resolved itself after it timed out finally
      * TODO: QA testing for possible crash scenarios
+     * TODO: figure out what's up with the stops that have no id. Should they be displayed at all? Are they really stops?
+     * TODO: check if some stops don't return predicted times... why does this happen?
      * Features:
-     * TODO: when click on stop, predictions should show which route: perhaps one line for each route?
-     * TODO: show vehicle direction in image - with arrow maybe?
+     * TODO: remove or change stops that are inactive (ie blue night stops during daytime)
+     * TODO: check if stop is valid
+     * TODO: show vehicle direction in image - with arrow or set flat and rotate icon
      * TODO: change vehicle marker color if vehicle has not moved much over time - ie turn vehicle marker red if vehicle appears to be stuck somewhere
      * TODO: activity to list nearby stops and predictions for next vehicles
      * TODO: attempt to determine if user is on a streetcar/bus, and present user with list of predicted times of arrival for upcoming stops
      * TODO: visual indicator in UI for user to know how the refreshing of info is going - spinner maybe?
+     * TODO: subway schedule activity
+     * Performance:
+     * TODO: remove unnecessary variables from TransitRoute object class to save memory
      */
 
     // Global variables
@@ -128,7 +136,7 @@ public class MapsActivity extends FragmentActivity implements
     private Thread t;
     private static boolean loopVehicleInfo = true;
     private static boolean vehicleListBuilt = false;
-    private static int sleepTime = 3000;
+    private static final int sleepTime = 5000;
 
     //Progressbar:
     ProgressDialog progress;
@@ -371,9 +379,9 @@ public class MapsActivity extends FragmentActivity implements
         } // end while
         return result;
     }
-    private ArrayList<String> parsePredictions(XmlPullParser parser) throws XmlPullParserException, IOException {
+    private ArrayList<TransitPrediction> parsePredictions(XmlPullParser parser) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
-        ArrayList<String> result = new ArrayList<String>();
+        ArrayList<TransitPrediction> result = new ArrayList<TransitPrediction>();
         while( eventType!= XmlPullParser.END_DOCUMENT) {
             String name = null;
             switch(eventType)
@@ -385,7 +393,14 @@ public class MapsActivity extends FragmentActivity implements
                     }
                     else if ( name.equals("prediction")) {
                         //System.out.println(parser.getAttributeValue(2));
-                        result.add(parser.getAttributeValue(2));
+                        String route = "";
+                        for (int x = 2; x < parser.getAttributeCount(); x++) {
+                            if (parser.getAttributeName(x).equals("branch")) {
+                                route = parser.getAttributeValue(x);
+                                break;
+                            }
+                        }
+                        result.add(new TransitPrediction(parser.getAttributeValue(2),route));
                     }
                     break;
                 case XmlPullParser.END_TAG:
@@ -516,15 +531,15 @@ public class MapsActivity extends FragmentActivity implements
             mHandler.post(mViewUpdater);
         }
     }
-    private class CallAPIForPrediction extends AsyncTask<String, String, ArrayList<String>> {
+    private class CallAPIForPrediction extends AsyncTask<String, String, ArrayList<TransitPrediction>> {
         @Override
-        protected ArrayList<String> doInBackground(String... params) {
+        protected ArrayList<TransitPrediction> doInBackground(String... params) {
             String stop = params[0];
             String key = params[1];
             String command = "predictions"; //Which command is being executed
             String urlString = apiURL + command + apiAgency + "&stopId=" + stop; // URL to call
             //String resultToDisplay = "";
-            ArrayList<String> results = new ArrayList<String>();
+            ArrayList<TransitPrediction> results = new ArrayList<TransitPrediction>();
             BufferedInputStream in = null;
 
             Log.i("Executing background API task", "Command is " + command);
@@ -551,7 +566,7 @@ public class MapsActivity extends FragmentActivity implements
                 parser.setInput(in, null);
                 results = parsePredictions(parser);
                 //Add key to results:
-                results.add(key);
+                results.add(new TransitPrediction(key,"KEY"));
             } catch (XmlPullParserException e) {
                 e.printStackTrace();
             } catch (IOException e) {
@@ -561,19 +576,37 @@ public class MapsActivity extends FragmentActivity implements
             return results;
         }
 
-        protected void onPostExecute(ArrayList<String> results) {
+        protected void onPostExecute(ArrayList<TransitPrediction> results) {
             //add predictions to Marker snippet:
-            String key = results.get(results.size()-1);
-            results.remove(results.size()-1);
+            String key = results.get(results.size()-1).getTime(); //get the key stored in the last TransitPrediction object, under the time variable (where the route variable is "KEY"
+            results.remove(results.size()-1); //remove the last variable
             Marker marker = visibleMarkers.get(key);
-            String newSnippet = marker.getSnippet().split("--")[0] + "--" + "Next vehicle(s):";
-            for (String result: results) {
-                newSnippet += " " + result + " mins";
-            }
-            marker.setSnippet(newSnippet);
-            marker.hideInfoWindow();
-            marker.showInfoWindow();
-            Log.i("API call complete", "Result = " + results);
+            if (marker != null) {
+                String newSnippet = marker.getSnippet().split("--")[0] + "--" + "Next vehicle(s):";
+
+                //build list of all routes found for this stop:
+                ArrayList<String> stopRoutes = new ArrayList<String>();
+                for (TransitPrediction result : results) {
+                    if (!stopRoutes.contains(result.getRoute())) {
+                        stopRoutes.add(result.getRoute());
+                    }
+                }
+                for (String route : stopRoutes) {
+                    //Start a new line and add the route number
+                    newSnippet += "\n" + route + ": ";
+                    for (TransitPrediction result : results) {
+                        if (result.getRoute().equals(route)) {
+                            //put prediction on one line of snipppet
+                            newSnippet += result.getTime() + " | ";
+                        }
+                    }
+                    newSnippet += "minutes";
+                }
+                marker.setSnippet(newSnippet);
+                marker.hideInfoWindow();
+                marker.showInfoWindow();
+                Log.i("API call complete", "Result = " + newSnippet);
+            } else { System.out.println("MARKER IS NULL: " + key); }
         }
     }
 
@@ -610,7 +643,6 @@ public class MapsActivity extends FragmentActivity implements
                             System.out.println(e.getMessage());
                             break;
                         }
-                        //TODO: sometimes this gets stuck somewhere on the url connection - doesn't make it to this point
                         System.out.println("Got API info");
                         // Parse XML
                         XmlPullParserFactory pullParserFactory;
@@ -811,6 +843,8 @@ public class MapsActivity extends FragmentActivity implements
                 getRoutes(); //Get route info
             }
             mMap.setMyLocationEnabled(true);
+            //Set custom marker info window:
+            mMap.setInfoWindowAdapter(new CustomInfoWindow(getLayoutInflater()));
             bounds = mMap.getProjection().getVisibleRegion().latLngBounds;
             mMap.setOnCameraChangeListener(new GoogleMap.OnCameraChangeListener() {
                 @Override
