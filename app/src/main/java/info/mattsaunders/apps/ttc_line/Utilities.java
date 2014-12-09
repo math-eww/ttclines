@@ -121,11 +121,13 @@ public class Utilities {
                     }
                     else if ( name.equals("stop")) {
                         if (parser.getAttributeCount() > 3) {
+                            String stopID;
+                            try { stopID = parser.getAttributeValue(4); } catch (IndexOutOfBoundsException e) { stopID = "0"; }
                             //create new transit route object
                             TransitStop tempStop = new TransitStop(parser.getAttributeValue(0),
                                     parser.getAttributeValue(1),
                                     new LatLng(Double.parseDouble(parser.getAttributeValue(2)), Double.parseDouble(parser.getAttributeValue(3))),
-                                    "0"); //subway stations don't have this one---parser.getAttributeValue(4)
+                                    stopID); //subway stations don't have this one---parser.getAttributeValue(4)
 
                             //add new transit route object to list
                             result.add(tempStop);

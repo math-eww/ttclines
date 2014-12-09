@@ -1,8 +1,11 @@
 package info.mattsaunders.apps.ttc_line;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.app.Dialog;
+import android.app.ProgressDialog;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentSender;
 import android.content.SharedPreferences;
@@ -15,6 +18,9 @@ import android.support.v4.app.DialogFragment;
 import android.support.v4.app.FragmentActivity;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.Menu;
+import android.view.MenuInflater;
+import android.view.MenuItem;
 import android.view.animation.Interpolator;
 import android.view.animation.LinearInterpolator;
 import android.widget.Toast;
@@ -54,11 +60,9 @@ public class MapsActivity extends FragmentActivity implements
         LocationListener {
 
     /**QA and stability:
-     * TODO: test crash when location isn't enabled
-     * TODO: test crash if wifi isn't enabled - something like that seems like it might be happening
-     * TODO: QA testing for other possible crash scenarios
+     * TODO: QA testing for possible crash scenarios
      * Features:
-     * TODO: when click on stop, show predictions for next vehicle for each line that serves that stop
+     * TODO: when click on stop, predictions should show which route: perhaps one line for each route?
      * TODO: show vehicle direction in image - with arrow maybe?
      * TODO: change vehicle marker color if vehicle has not moved much over time - ie turn vehicle marker red if vehicle appears to be stuck somewhere
      * TODO: activity to list nearby stops and predictions for next vehicles
@@ -97,6 +101,8 @@ public class MapsActivity extends FragmentActivity implements
     private static final int FASTEST_INTERVAL_IN_SECONDS = 1;
     // A fast frequency ceiling in milliseconds
     private static final long FASTEST_INTERVAL = MILLISECONDS_PER_SECOND * FASTEST_INTERVAL_IN_SECONDS;
+    //Default location:
+    private static final LatLng TORONTO = new LatLng(43.7000,-79.4000);
 
     //API constants:
     public final static String apiURL = "http://webservices.nextbus.com/service/publicXMLFeed?command=";
@@ -123,6 +129,9 @@ public class MapsActivity extends FragmentActivity implements
     private static boolean loopVehicleInfo = true;
     private static boolean vehicleListBuilt = false;
     private static int sleepTime = 3000;
+
+    //Progressbar:
+    ProgressDialog progress;
 
     @Override
     protected void onStart() {
@@ -198,7 +207,55 @@ public class MapsActivity extends FragmentActivity implements
         }
     }
 
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        // Inflate the menu items for use in the action bar
+        MenuInflater inflater = getMenuInflater();
+        inflater.inflate(R.menu.main_activity_actions, menu);
+        return super.onCreateOptionsMenu(menu);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        // Handle presses on the action bar items
+        switch (item.getItemId()) {
+            case R.id.action_settings:
+                openSettings();
+                return true;
+            default:
+                return super.onOptionsItemSelected(item);
+        }
+    }
+
+    private void openSettings() {
+        System.out.println("Settings selected");
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        builder.setMessage("Download Info")
+                .setTitle("Refresh route and stop info?");
+        // Add the buttons
+        builder.setPositiveButton(R.string.ok, new DialogInterface.OnClickListener() {
+            public void onClick(DialogInterface dialog, int id) {
+                // User clicked OK button
+                getRoutes();
+            }
+        });
+        builder.setNegativeButton(R.string.cancel, new DialogInterface.OnClickListener() {
+            public void onClick(DialogInterface dialog, int id) {
+                // User cancelled the dialog
+            }
+        });
+        // Set other dialog properties
+
+        // Create the AlertDialog
+        AlertDialog dialog = builder.create();
+
+        //Show dialog:
+        dialog.show();
+    }
+
     private void getRoutes() {
+        gotRouteInfo = false;
+        loopVehicleInfo = false;
         apiCommand = "routeList";
         String urlString = apiURL + apiCommand + apiAgency;
         new CallAPI().execute(urlString,"routeList");
@@ -294,11 +351,13 @@ public class MapsActivity extends FragmentActivity implements
                     }
                     else if ( name.equals("stop")) {
                         if (parser.getAttributeCount() > 3) {
+                            String stopID;
+                            try { stopID = parser.getAttributeValue(4); } catch (IndexOutOfBoundsException e) { stopID = "0"; }
                             //create new transit route object
                             TransitStop tempStop = new TransitStop(parser.getAttributeValue(0),
                                     parser.getAttributeValue(1),
                                     new LatLng(Double.parseDouble(parser.getAttributeValue(2)), Double.parseDouble(parser.getAttributeValue(3))),
-                                    "0"); //subway stations don't have this one---parser.getAttributeValue(4)
+                                   stopID); //subway stations don't have this one---parser.getAttributeValue(4)
 
                             //add new transit route object to list
                             result.add(tempStop);
@@ -312,7 +371,40 @@ public class MapsActivity extends FragmentActivity implements
         } // end while
         return result;
     }
+    private ArrayList<String> parsePredictions(XmlPullParser parser) throws XmlPullParserException, IOException {
+        int eventType = parser.getEventType();
+        ArrayList<String> result = new ArrayList<String>();
+        while( eventType!= XmlPullParser.END_DOCUMENT) {
+            String name = null;
+            switch(eventType)
+            {
+                case XmlPullParser.START_TAG:
+                    name = parser.getName();
+                    if( name.equals("Error")) {
+                        System.out.println("Web API Error!");
+                    }
+                    else if ( name.equals("prediction")) {
+                        //System.out.println(parser.getAttributeValue(2));
+                        result.add(parser.getAttributeValue(2));
+                    }
+                    break;
+                case XmlPullParser.END_TAG:
+                    break;
+            } // end switch
+            eventType = parser.next();
+        } // end while
+        return result;
+    }
     private class CallAPI extends AsyncTask<String, String, String> {
+        @Override
+        protected void onPreExecute() {
+            progress = new ProgressDialog(MapsActivity.this);
+            progress.setMessage("Updating route and stop info");
+            progress.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+            progress.setCancelable(false);
+            //progress.setIndeterminate(true);
+            progress.show();
+        }
         @Override
         protected String doInBackground(String... params) {
             String urlString = params[0]; // URL to call
@@ -352,8 +444,16 @@ public class MapsActivity extends FragmentActivity implements
                 //Process data from routeList command:
                 routes = parseRouteList(parser);
                 System.out.println("----------------Built route list---------------");
+                //Set progress bar:
+                int downProgress = 2;
+                progress.setProgress(downProgress/2);
+                int downProgressIncrement = 198/routes.size(); //routes.size is roughly 180
+                //System.out.println("INCREMENT: " + downProgressIncrement + "/" + " interval " + routes.size());
                 System.out.println("--------------Building stops list--------------");
                 for (TransitRoute route : routes) {
+                    //Update progress bar:
+                    downProgress += downProgressIncrement;
+                    progress.setProgress(downProgress/2);
                     System.out.println("Getting stops on " + route.getRouteId() + " " + route.getRouteName());
 
                     apiCommand = "routeConfig";
@@ -388,6 +488,7 @@ public class MapsActivity extends FragmentActivity implements
                     System.out.println("Route name: " + route.getRouteName());
                     System.out.println("Number of stops: " + route.getStopsList().size());
                 }
+                progress.setProgress(99);
                 System.out.println("Number of routes: " + routes.size());
                 //End process data from routeList command
             } catch (XmlPullParserException e) {
@@ -399,9 +500,80 @@ public class MapsActivity extends FragmentActivity implements
         }
 
         protected void onPostExecute(String result) {
+            progress.hide();
+
             Log.i("API call complete", "Result = " + result);
             gotRouteInfo = true;
             displayStops();
+
+            //begin updating vehicle info again:
+            loopVehicleInfo = true;
+            apiCommand = "vehicleLocations";
+            getVehicleUpdates();
+            t= new Thread(mUpdater);
+            t.start();
+            updateVehicleView();
+            mHandler.post(mViewUpdater);
+        }
+    }
+    private class CallAPIForPrediction extends AsyncTask<String, String, ArrayList<String>> {
+        @Override
+        protected ArrayList<String> doInBackground(String... params) {
+            String stop = params[0];
+            String key = params[1];
+            String command = "predictions"; //Which command is being executed
+            String urlString = apiURL + command + apiAgency + "&stopId=" + stop; // URL to call
+            //String resultToDisplay = "";
+            ArrayList<String> results = new ArrayList<String>();
+            BufferedInputStream in = null;
+
+            Log.i("Executing background API task", "Command is " + command);
+
+            // HTTP Get
+            try {
+                URL url = new URL(urlString);
+                HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection(); //API result
+                in = new BufferedInputStream(urlConnection.getInputStream());
+            } catch (Exception e) {
+                System.out.println("FAILED TO RETRIEVE URL");
+                e.printStackTrace();
+                System.out.println(e.getMessage());
+                return null;
+            }
+
+            // Parse XML
+            XmlPullParserFactory pullParserFactory;
+            try {
+                pullParserFactory = XmlPullParserFactory.newInstance();
+                XmlPullParser parser = pullParserFactory.newPullParser();
+
+                parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false);
+                parser.setInput(in, null);
+                results = parsePredictions(parser);
+                //Add key to results:
+                results.add(key);
+            } catch (XmlPullParserException e) {
+                e.printStackTrace();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            //return resultToDisplay;
+            return results;
+        }
+
+        protected void onPostExecute(ArrayList<String> results) {
+            //add predictions to Marker snippet:
+            String key = results.get(results.size()-1);
+            results.remove(results.size()-1);
+            Marker marker = visibleMarkers.get(key);
+            String newSnippet = marker.getSnippet().split("--")[0] + "--" + "Next vehicle(s):";
+            for (String result: results) {
+                newSnippet += " " + result + " mins";
+            }
+            marker.setSnippet(newSnippet);
+            marker.hideInfoWindow();
+            marker.showInfoWindow();
+            Log.i("API call complete", "Result = " + results);
         }
     }
 
@@ -438,6 +610,7 @@ public class MapsActivity extends FragmentActivity implements
                             System.out.println(e.getMessage());
                             break;
                         }
+                        //TODO: sometimes this gets stuck somewhere on the url connection - doesn't make it to this point
                         System.out.println("Got API info");
                         // Parse XML
                         XmlPullParserFactory pullParserFactory;
@@ -493,7 +666,9 @@ public class MapsActivity extends FragmentActivity implements
                         if (!visibleMarkers.containsKey(stop.getStopTag())) {
                             visibleMarkers.put(stop.getStopTag(), mMap.addMarker(new MarkerOptions()
                                             .position(stopLoc)
-                                            .title(stop.getStopTitle() + " ID tag: " + stop.getStopTag())
+                                            .title(stop.getStopTitle())
+                                            .flat(true)
+                                            .snippet(stop.getStopId())
                                             .icon(BitmapDescriptorFactory.fromResource(R.drawable.stop))
                             ));
                         }
@@ -571,7 +746,6 @@ public class MapsActivity extends FragmentActivity implements
     }
 
     private void updateVehicleView() {
-        //TODO: fix - more than one instance of this runs - if user closes and immediately reopens app, it's possible for this to stop altogether
         mViewUpdater = new Runnable() {
             @Override
             public void run() {
@@ -612,7 +786,6 @@ public class MapsActivity extends FragmentActivity implements
             }
         }
         if (!t.isAlive()) {
-            //TODO: Sanity checking = this fails if user immediately reopens app - partially fixed? using t.interrupt()
             loopVehicleInfo = true;
             apiCommand = "vehicleLocations";
             getVehicleUpdates();
@@ -632,7 +805,6 @@ public class MapsActivity extends FragmentActivity implements
     private void setUpMap() {
         if (servicesConnected()) {
             Log.i("Services Connected ", "TRUE");
-            //TODO: UI settings page, give user option to refresh data
             if (Utilities.checkXMLFile()) {
                 routes = Utilities.parseSavedXML();
             } else {
@@ -662,7 +834,12 @@ public class MapsActivity extends FragmentActivity implements
                     marker.showInfoWindow();
                     if (visibleMarkers.containsValue(marker)) {
                         String key = Utilities.getKeyFromValue(marker, visibleMarkers);
-                        System.out.println("MARKER CLICKED! " + marker.getId() + " " + marker.getTitle() + " = stop id: " + key);
+                        //System.out.println("MARKER CLICKED! " + marker.getId() + " " + marker.getTitle() + " = stop tag: " + key);
+                        String id = marker.getSnippet().split("--")[0];
+                        System.out.println("Marker has id # " + id);
+                        //Get predictions for stop
+                        //ArrayList<String> predictions =
+                        new CallAPIForPrediction().execute(id,key);
                     }
                     return true;
                 }
@@ -680,7 +857,11 @@ public class MapsActivity extends FragmentActivity implements
         //Store current location
         mCurrentLocation = mLocationClient.getLastLocation();
         //Build LatLng object to store current user location:
-        userLocation = new LatLng (mCurrentLocation.getLatitude(), mCurrentLocation.getLongitude());
+        if (mCurrentLocation != null) {
+            userLocation = new LatLng(mCurrentLocation.getLatitude(), mCurrentLocation.getLongitude());
+        } else {
+            userLocation = TORONTO;
+        }
         // Construct a CameraPosition focusing on userLocation and animate the camera to that position.
         cameraPosition = new CameraPosition.Builder()
                 .target(userLocation)       // Sets the center of the map to User's location
