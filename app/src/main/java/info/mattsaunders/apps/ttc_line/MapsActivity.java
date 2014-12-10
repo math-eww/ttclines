@@ -30,7 +30,6 @@ import com.google.android.gms.common.GooglePlayServicesUtil;
 import com.google.android.gms.common.api.GoogleApiClient;
 import com.google.android.gms.location.FusedLocationProviderApi;
 import com.google.android.gms.location.LocationServices;
-
 import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationListener;
 import com.google.android.gms.maps.CameraUpdateFactory;
@@ -95,7 +94,6 @@ public class MapsActivity extends FragmentActivity implements
     GoogleApiClient mGoogleApiClient;
     FusedLocationProviderApi fusedLocationProviderApi;
     LocationRequest mLocationRequest;
-    LocationListener mLocationListener;
     boolean mUpdatesRequested;
     LatLng userLocation;
     CameraPosition cameraPosition;
@@ -160,14 +158,13 @@ public class MapsActivity extends FragmentActivity implements
     protected void onStart() {
         super.onStart();
         // Connect the client.
-        //mLocationClient.connect();
         mGoogleApiClient.connect();
     }
 
     @Override
     protected void onStop() {
         if (mGoogleApiClient.isConnected()) {
-            fusedLocationProviderApi.removeLocationUpdates(mGoogleApiClient, mLocationListener);
+            fusedLocationProviderApi.removeLocationUpdates(mGoogleApiClient, this);
         }
         // Disconnecting the client invalidates it.
         mGoogleApiClient.disconnect();
@@ -207,6 +204,7 @@ public class MapsActivity extends FragmentActivity implements
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_maps);
+
         mLocationRequest = LocationRequest.create();
         mGoogleApiClient = new GoogleApiClient.Builder(this)
                 .addApi(LocationServices.API)
@@ -264,10 +262,7 @@ public class MapsActivity extends FragmentActivity implements
 
         // If already requested, start periodic updates
         if (mUpdatesRequested) {
-            //fusedLocationProviderApi.requestLocationUpdates(mGoogleApiClient, mLocationRequest, this);
-                // ^ this seems to be for background use cases
-                // we only want updates when the app is in the foreground, so we'll use:
-            fusedLocationProviderApi.requestLocationUpdates(mGoogleApiClient, mLocationRequest, mLocationListener);
+            fusedLocationProviderApi.requestLocationUpdates(mGoogleApiClient, mLocationRequest, this);
         }
 
     }
