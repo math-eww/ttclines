@@ -26,9 +26,11 @@ import android.view.animation.LinearInterpolator;
 import android.widget.Toast;
 
 import com.google.android.gms.common.ConnectionResult;
-import com.google.android.gms.common.GooglePlayServicesClient;
 import com.google.android.gms.common.GooglePlayServicesUtil;
-import com.google.android.gms.location.LocationClient;
+import com.google.android.gms.common.api.GoogleApiClient;
+import com.google.android.gms.location.FusedLocationProviderApi;
+import com.google.android.gms.location.LocationServices;
+
 import com.google.android.gms.location.LocationRequest;
 import com.google.android.gms.location.LocationListener;
 import com.google.android.gms.maps.CameraUpdateFactory;
@@ -55,8 +57,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 
 public class MapsActivity extends FragmentActivity implements
-        GooglePlayServicesClient.ConnectionCallbacks,
-        GooglePlayServicesClient.OnConnectionFailedListener,
+        GoogleApiClient.ConnectionCallbacks,
+        GoogleApiClient.OnConnectionFailedListener,
         LocationListener {
 
     /**-----------
@@ -68,7 +70,7 @@ public class MapsActivity extends FragmentActivity implements
      * --- need to differentiate between these and those that overlap
      * --- use routeTag and stopTag method for calling API to get predictions (currently using stopId method)
      * TODO: research: find out why some stops are included in list, have a valid ID, but don't return predictions
-     * --- could be blue night stops possibly?
+     * --- could be blue night stops possibly -- seems likely but needs more testing
      *
      * -----------
      * Features:
@@ -90,8 +92,10 @@ public class MapsActivity extends FragmentActivity implements
 
     // Global variables
     Location mCurrentLocation;
-    LocationClient mLocationClient;
+    GoogleApiClient mGoogleApiClient;
+    FusedLocationProviderApi fusedLocationProviderApi;
     LocationRequest mLocationRequest;
+    LocationListener mLocationListener;
     boolean mUpdatesRequested;
     LatLng userLocation;
     CameraPosition cameraPosition;
@@ -156,7 +160,18 @@ public class MapsActivity extends FragmentActivity implements
     protected void onStart() {
         super.onStart();
         // Connect the client.
-        mLocationClient.connect();
+        //mLocationClient.connect();
+        mGoogleApiClient.connect();
+    }
+
+    @Override
+    protected void onStop() {
+        if (mGoogleApiClient.isConnected()) {
+            fusedLocationProviderApi.removeLocationUpdates(mGoogleApiClient, mLocationListener);
+        }
+        // Disconnecting the client invalidates it.
+        mGoogleApiClient.disconnect();
+        super.onStop();
     }
 
     @Override
@@ -167,44 +182,6 @@ public class MapsActivity extends FragmentActivity implements
         mEditor.putBoolean("KEY_UPDATES_ON", mUpdatesRequested);
         mEditor.commit();
         super.onPause();
-    }
-
-    @Override
-    protected void onStop() {
-        if (mLocationClient.isConnected()) {
-            /*
-             * Remove location updates for a listener.
-             * The current Activity is the listener, so
-             * the argument is "this".
-             */
-            mLocationClient.removeLocationUpdates(this);
-        }
-        // Disconnecting the client invalidates it.
-        mLocationClient.disconnect();
-        super.onStop();
-    }
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_maps);
-        mLocationRequest = LocationRequest.create();
-        mLocationClient = new LocationClient(this, this, this);
-        setUpMapIfNeeded();
-
-        // Use high accuracy
-        mLocationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
-        // Set the update interval to 5 seconds
-        mLocationRequest.setInterval(UPDATE_INTERVAL);
-        // Set the fastest update interval to 1 second
-        mLocationRequest.setFastestInterval(FASTEST_INTERVAL);
-        // Start with updates turned off
-        mUpdatesRequested = false;
-        // Open the shared preferences
-        mPrefs = getSharedPreferences("SharedPreferences",
-                Context.MODE_PRIVATE);
-        // Get a SharedPreferences editor
-        mEditor = mPrefs.edit();
     }
 
     @Override
@@ -227,6 +204,35 @@ public class MapsActivity extends FragmentActivity implements
     }
 
     @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_maps);
+        mLocationRequest = LocationRequest.create();
+        mGoogleApiClient = new GoogleApiClient.Builder(this)
+                .addApi(LocationServices.API)
+                .addConnectionCallbacks(this)
+                .addOnConnectionFailedListener(this)
+                .build();
+        fusedLocationProviderApi = LocationServices.FusedLocationApi;
+
+        setUpMapIfNeeded();
+
+        // Use high accuracy
+        mLocationRequest.setPriority(LocationRequest.PRIORITY_HIGH_ACCURACY);
+        // Set the update interval to 5 seconds
+        mLocationRequest.setInterval(UPDATE_INTERVAL);
+        // Set the fastest update interval to 1 second
+        mLocationRequest.setFastestInterval(FASTEST_INTERVAL);
+        // Start with updates turned off
+        mUpdatesRequested = false;
+        // Open the shared preferences
+        mPrefs = getSharedPreferences("SharedPreferences",
+                Context.MODE_PRIVATE);
+        // Get a SharedPreferences editor
+        mEditor = mPrefs.edit();
+    }
+
+    @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         // Inflate the menu items for use in the action bar
         MenuInflater inflater = getMenuInflater();
@@ -243,6 +249,154 @@ public class MapsActivity extends FragmentActivity implements
                 return true;
             default:
                 return super.onOptionsItemSelected(item);
+        }
+    }
+
+    @Override
+    public void onConnected(Bundle dataBundle) {
+        // Display the connection status
+        Toast.makeText(this, "Connected", Toast.LENGTH_SHORT).show();
+
+        Log.d("Setting up map", "Location Services connected " + mGoogleApiClient.isConnected());
+        Log.d("Setting up map", "Getting user location " + fusedLocationProviderApi.getLastLocation(mGoogleApiClient));
+        //Call method to get location:
+        updateMap();
+
+        // If already requested, start periodic updates
+        if (mUpdatesRequested) {
+            //fusedLocationProviderApi.requestLocationUpdates(mGoogleApiClient, mLocationRequest, this);
+                // ^ this seems to be for background use cases
+                // we only want updates when the app is in the foreground, so we'll use:
+            fusedLocationProviderApi.requestLocationUpdates(mGoogleApiClient, mLocationRequest, mLocationListener);
+        }
+
+    }
+
+    @Override
+    public void onConnectionSuspended(int i) {
+        Log.i("TTC-Lines", "GoogleApiClient connection has been suspended");
+    }
+
+    @Override
+    public void onConnectionFailed(ConnectionResult connectionResult) {
+        Log.i("TTC-Lines", "GoogleApiClient connection has failed");
+        //Unsure if this is still all needed, but we'll leave it in for now
+        /*
+         * Google Play services can resolve some errors it detects.
+         * If the error has a resolution, try sending an Intent to
+         * start a Google Play services activity that can resolve
+         * error.
+         */
+        if (connectionResult.hasResolution()) {
+            try {
+                // Start an Activity that tries to resolve the error
+                connectionResult.startResolutionForResult(this, CONNECTION_FAILURE_RESOLUTION_REQUEST);
+                /*
+                 * Thrown if Google Play services canceled the original
+                 * PendingIntent
+                 */
+            } catch (IntentSender.SendIntentException e) {
+                // Log the error
+                e.printStackTrace();
+            }
+        } else {
+            /*
+             * If no resolution is available, display a dialog to the
+             * user with the error.
+             */
+            showErrorDialog(connectionResult.getErrorCode());
+        }
+    }
+
+    @Override
+    public void onLocationChanged(Location location) {
+        // Report to the UI that the location was updated
+        String msg = "Updated Location: " +
+                Double.toString(location.getLatitude()) + "," +
+                Double.toString(location.getLongitude());
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        //Unsure if this is still needed, but we'll leave it in for now
+        // Decide what to do based on the original request code
+        switch (requestCode) {
+            case CONNECTION_FAILURE_RESOLUTION_REQUEST :
+            /*
+             * If the result code is Activity.RESULT_OK, try
+             * to connect again
+             */
+                switch (resultCode) {
+                    case Activity.RESULT_OK :
+                    /*
+                     * Try the request again
+                     */
+                        break;
+                }
+        }
+    }
+
+    public static class ErrorDialogFragment extends DialogFragment {
+        // Global field to contain the error dialog
+        private Dialog mDialog;
+        // Default constructor. Sets the dialog field to null
+        public ErrorDialogFragment() {
+            super();
+            mDialog = null;
+        }
+        // Set the dialog to display
+        public void setDialog(Dialog dialog) {
+            mDialog = dialog;
+        }
+        // Return a Dialog to the DialogFragment.
+        @Override
+        public Dialog onCreateDialog(Bundle savedInstanceState) {
+            return mDialog;
+        }
+    }
+    public void showErrorDialog(int errorCode){
+        Dialog errorDialog = GooglePlayServicesUtil.getErrorDialog(errorCode, this, CONNECTION_FAILURE_RESOLUTION_REQUEST);
+
+        // If Google Play services can provide an error dialog
+        if (errorDialog != null) {
+            // Create a new DialogFragment for the error dialog
+            ErrorDialogFragment errorFragment = new ErrorDialogFragment();
+            // Set the dialog in the DialogFragment
+            errorFragment.setDialog(errorDialog);
+            // Show the error dialog in the DialogFragment
+            errorFragment.show(getSupportFragmentManager(), "Location Updates");
+        }
+    }
+    private boolean servicesConnected() {
+        // Check that Google Play services is available
+        int resultCode = GooglePlayServicesUtil.isGooglePlayServicesAvailable(this);
+        // If Google Play services is available
+        if (ConnectionResult.SUCCESS == resultCode) {
+            // In debug mode, log the status
+            Log.d("Location Updates",
+                    "Google Play services is available.");
+            // Continue
+            return true;
+            // Google Play services was not available for some reason.
+            // resultCode holds the error code.
+        } else {
+            // Get the error dialog from Google Play services
+            Dialog errorDialog = GooglePlayServicesUtil.getErrorDialog(resultCode, this, CONNECTION_FAILURE_RESOLUTION_REQUEST);
+
+            // If Google Play services can provide an error dialog
+            if (errorDialog != null) {
+                // Create a new DialogFragment for the error dialog
+                ErrorDialogFragment errorFragment =
+                        new ErrorDialogFragment();
+                // Set the dialog in the DialogFragment
+                errorFragment.setDialog(errorDialog);
+                // Show the error dialog in the DialogFragment
+                errorFragment.show(getSupportFragmentManager(),
+                        "Location Updates");
+            }
+
+            return false;
         }
     }
 
@@ -270,14 +424,6 @@ public class MapsActivity extends FragmentActivity implements
 
         //Show dialog:
         dialog.show();
-    }
-
-    private void getRoutes() {
-        gotRouteInfo = false;
-        loopVehicleInfo = false;
-        apiCommand = "routeList";
-        String urlString = apiURL + apiCommand + apiAgency;
-        new CallAPI().execute(urlString,"routeList");
     }
     private ArrayList<TransitVehicle> parseVehicleList(XmlPullParser parser) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
@@ -621,7 +767,13 @@ public class MapsActivity extends FragmentActivity implements
             } else { System.out.println("MARKER IS NULL: " + key); }
         }
     }
-
+    private void getRoutes() {
+        gotRouteInfo = false;
+        loopVehicleInfo = false;
+        apiCommand = "routeList";
+        String urlString = apiURL + apiCommand + apiAgency;
+        new CallAPI().execute(urlString,"routeList");
+    }
     private void getVehicleUpdates() { //set API command before beginning to vehicleLocation
         mUpdater = new Runnable() {
             @Override
@@ -715,7 +867,7 @@ public class MapsActivity extends FragmentActivity implements
                             visibleMarkers.put(stop.getStopTag(), mMap.addMarker(new MarkerOptions()
                                             .position(stopLoc)
                                             .title(stop.getStopTitle() + " - " + stop.getStopTag())
-                                            //.flat(true)
+                                            .flat(true)
                                             .snippet(stop.getStopId())
                                             .icon(BitmapDescriptorFactory.fromResource(R.drawable.stop))
                             ));
@@ -755,7 +907,19 @@ public class MapsActivity extends FragmentActivity implements
             }
         }
     }
-
+    private void updateVehicleView() {
+        mViewUpdater = new Runnable() {
+            @Override
+            public void run() {
+                System.out.println("UPDATING VEHICLE VIEW!");
+                if (!loopVehicleInfo) { return; }
+                mHandler.postDelayed(this, sleepTime / 2);
+                if (vehicleListBuilt) {
+                    displayVehicles();
+                }
+            }
+        };
+    }
     public void animateMarker(final Marker marker, final LatLng toPosition,
                               final boolean hideMarker) {
         final Handler handler = new Handler();
@@ -793,19 +957,6 @@ public class MapsActivity extends FragmentActivity implements
         });
     }
 
-    private void updateVehicleView() {
-        mViewUpdater = new Runnable() {
-            @Override
-            public void run() {
-                System.out.println("UPDATING VEHICLE VIEW!");
-                if (!loopVehicleInfo) { return; }
-                mHandler.postDelayed(this, sleepTime / 2);
-                if (vehicleListBuilt) {
-                    displayVehicles();
-                }
-            }
-        };
-    }
 
     /**
      * Sets up the map if it is possible to do so (i.e., the Google Play services APK is correctly
@@ -905,7 +1056,7 @@ public class MapsActivity extends FragmentActivity implements
 
     private void updateMap() {
         //Store current location
-        mCurrentLocation = mLocationClient.getLastLocation();
+        mCurrentLocation = fusedLocationProviderApi.getLastLocation(mGoogleApiClient);
         //Build LatLng object to store current user location:
         if (mCurrentLocation != null) {
             userLocation = new LatLng(mCurrentLocation.getLatitude(), mCurrentLocation.getLongitude());
@@ -925,168 +1076,7 @@ public class MapsActivity extends FragmentActivity implements
             firstLaunch = false;
         }
         bounds = mMap.getProjection().getVisibleRegion().latLngBounds;
-
     }
 
-    /*
-    * Called by Location Services when the request to connect the
-    * client finishes successfully. At this point, you can
-    * request the current location or start periodic updates
-    */
-    @Override
-    public void onConnected(Bundle dataBundle) {
-        // Display the connection status
-        Toast.makeText(this, "Connected", Toast.LENGTH_SHORT).show();
-
-        Log.d("Setting up map", "Location Services connected " + mLocationClient.isConnected());
-        Log.d("Setting up map", "Getting user location " + mLocationClient.getLastLocation());
-        //Call method to get location:
-        updateMap();
-
-        // If already requested, start periodic updates
-        if (mUpdatesRequested) {
-            mLocationClient.requestLocationUpdates(mLocationRequest, this);
-        }
-    }
-
-    /*
-     * Called by Location Services if the connection to the
-     * location client drops because of an error.
-     */
-    @Override
-    public void onDisconnected() {
-        // Display the connection status
-        Toast.makeText(this, "Disconnected. Please re-connect.",
-                Toast.LENGTH_SHORT).show();
-    }
-
-    // Define the callback method that receives location updates
-    @Override
-    public void onLocationChanged(Location location) {
-        // Report to the UI that the location was updated
-        String msg = "Updated Location: " +
-                Double.toString(location.getLatitude()) + "," +
-                Double.toString(location.getLongitude());
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show();
-    }
-
-
-    /*
-     * Called by Location Services if the attempt to
-     * Location Services fails.
-     */
-    @Override
-    public void onConnectionFailed(ConnectionResult connectionResult) {
-        /*
-         * Google Play services can resolve some errors it detects.
-         * If the error has a resolution, try sending an Intent to
-         * start a Google Play services activity that can resolve
-         * error.
-         */
-        if (connectionResult.hasResolution()) {
-            try {
-                // Start an Activity that tries to resolve the error
-                connectionResult.startResolutionForResult(this, CONNECTION_FAILURE_RESOLUTION_REQUEST);
-                /*
-                 * Thrown if Google Play services canceled the original
-                 * PendingIntent
-                 */
-            } catch (IntentSender.SendIntentException e) {
-                // Log the error
-                e.printStackTrace();
-            }
-        } else {
-            /*
-             * If no resolution is available, display a dialog to the
-             * user with the error.
-             */
-            showErrorDialog(connectionResult.getErrorCode());
-        }
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        // Decide what to do based on the original request code
-        switch (requestCode) {
-            case CONNECTION_FAILURE_RESOLUTION_REQUEST :
-            /*
-             * If the result code is Activity.RESULT_OK, try
-             * to connect again
-             */
-                switch (resultCode) {
-                    case Activity.RESULT_OK :
-                    /*
-                     * Try the request again
-                     */
-                        break;
-                }
-        }
-    }
-
-    // Define a DialogFragment that displays the error dialog
-    public static class ErrorDialogFragment extends DialogFragment {
-        // Global field to contain the error dialog
-        private Dialog mDialog;
-        // Default constructor. Sets the dialog field to null
-        public ErrorDialogFragment() {
-            super();
-            mDialog = null;
-        }
-        // Set the dialog to display
-        public void setDialog(Dialog dialog) {
-            mDialog = dialog;
-        }
-        // Return a Dialog to the DialogFragment.
-        @Override
-        public Dialog onCreateDialog(Bundle savedInstanceState) {
-            return mDialog;
-        }
-    }
-
-    public void showErrorDialog(int errorCode){
-        Dialog errorDialog = GooglePlayServicesUtil.getErrorDialog(errorCode, this, CONNECTION_FAILURE_RESOLUTION_REQUEST);
-
-        // If Google Play services can provide an error dialog
-        if (errorDialog != null) {
-            // Create a new DialogFragment for the error dialog
-            ErrorDialogFragment errorFragment = new ErrorDialogFragment();
-            // Set the dialog in the DialogFragment
-            errorFragment.setDialog(errorDialog);
-            // Show the error dialog in the DialogFragment
-            errorFragment.show(getSupportFragmentManager(), "Location Updates");
-        }
-    }
-
-    private boolean servicesConnected() {
-        // Check that Google Play services is available
-        int resultCode = GooglePlayServicesUtil.isGooglePlayServicesAvailable(this);
-        // If Google Play services is available
-        if (ConnectionResult.SUCCESS == resultCode) {
-            // In debug mode, log the status
-            Log.d("Location Updates",
-                    "Google Play services is available.");
-            // Continue
-            return true;
-            // Google Play services was not available for some reason.
-            // resultCode holds the error code.
-        } else {
-            // Get the error dialog from Google Play services
-            Dialog errorDialog = GooglePlayServicesUtil.getErrorDialog(resultCode, this, CONNECTION_FAILURE_RESOLUTION_REQUEST);
-
-            // If Google Play services can provide an error dialog
-            if (errorDialog != null) {
-                // Create a new DialogFragment for the error dialog
-                ErrorDialogFragment errorFragment =
-                        new ErrorDialogFragment();
-                // Set the dialog in the DialogFragment
-                errorFragment.setDialog(errorDialog);
-                // Show the error dialog in the DialogFragment
-                errorFragment.show(getSupportFragmentManager(),
-                        "Location Updates");
-            }
-
-            return false;
-        }
-    }
 //End of file
 }
