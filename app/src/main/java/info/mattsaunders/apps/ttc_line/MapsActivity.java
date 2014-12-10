@@ -59,23 +59,33 @@ public class MapsActivity extends FragmentActivity implements
         GooglePlayServicesClient.OnConnectionFailedListener,
         LocationListener {
 
-    /**QA and stability:
+    /**-----------
+     * QA and stability:
+     * -----------
      * TODO: PRIORITY - after being open a while (possible other causes) - vehicle updating loop fails to continue - gets stuck after "Getting Vehicles on route: ##"
      * --- seems to be a timeout thing - maybe the timeout length is too long? maybe use setConnectionTimeout - problem resolved itself after it timed out finally
-     * TODO: QA testing for possible crash scenarios
-     * TODO: figure out what's up with the stops that have no id. Should they be displayed at all? Are they really stops?
-     * TODO: check if some stops don't return predicted times... why does this happen?
+     * TODO: fix: some stops that have no id are not overlapping - despite the extra tag on their stop tag - they are removed currently, but should be shown
+     * --- need to differentiate between these and those that overlap
+     * --- use routeTag and stopTag method for calling API to get predictions (currently using stopId method)
+     * TODO: research: find out why some stops are included in list, have a valid ID, but don't return predictions
+     * --- could be blue night stops possibly?
+     *
+     * -----------
      * Features:
+     * -----------
      * TODO: remove or change stops that are inactive (ie blue night stops during daytime)
-     * TODO: check if stop is valid
      * TODO: show vehicle direction in image - with arrow or set flat and rotate icon
      * TODO: change vehicle marker color if vehicle has not moved much over time - ie turn vehicle marker red if vehicle appears to be stuck somewhere
      * TODO: activity to list nearby stops and predictions for next vehicles
      * TODO: attempt to determine if user is on a streetcar/bus, and present user with list of predicted times of arrival for upcoming stops
      * TODO: visual indicator in UI for user to know how the refreshing of info is going - spinner maybe?
      * TODO: subway schedule activity
+     *
+     * -----------
      * Performance:
+     * -----------
      * TODO: remove unnecessary variables from TransitRoute object class to save memory
+     * TODO: remove superfluous print/log commands
      */
 
     // Global variables
@@ -95,6 +105,7 @@ public class MapsActivity extends FragmentActivity implements
     private GoogleMap mMap; // Might be null if Google Play services APK is not available.
     private SharedPreferences mPrefs;
     private SharedPreferences.Editor mEditor;
+    private static boolean firstLaunch = true;
 
     // Request code, used in onActivityResult
     private final static int
@@ -602,6 +613,7 @@ public class MapsActivity extends FragmentActivity implements
                     }
                     newSnippet += "minutes";
                 }
+                if (results.size() < 1) { newSnippet += "\n" + "NOT IN SERVICE"; }
                 marker.setSnippet(newSnippet);
                 marker.hideInfoWindow();
                 marker.showInfoWindow();
@@ -695,11 +707,15 @@ public class MapsActivity extends FragmentActivity implements
                 for (TransitStop stop : stops) {
                     LatLng stopLoc = stop.getLocation();
                     if (bounds.contains(stopLoc)) {
+                        if (stop.getStopTag().split("_").length > 1) {  //Skip displaying stop if it's an _ar stop (allows the one underneath to show) (some don't have one underneath - these edge cases need to be dealt with)
+                            System.out.println("Found an _ in " + stop.getStopTag() + " with id: " + stop.getStopId() + " called " + stop.getStopTitle());
+                            break;
+                        } //Consider replacing this with if (stop.getStopId().equals("0") { break; } to guarantee no illegitimate stops are shown (at risk of removing stops that should exist)
                         if (!visibleMarkers.containsKey(stop.getStopTag())) {
                             visibleMarkers.put(stop.getStopTag(), mMap.addMarker(new MarkerOptions()
                                             .position(stopLoc)
-                                            .title(stop.getStopTitle())
-                                            .flat(true)
+                                            .title(stop.getStopTitle() + " - " + stop.getStopTag())
+                                            //.flat(true)
                                             .snippet(stop.getStopId())
                                             .icon(BitmapDescriptorFactory.fromResource(R.drawable.stop))
                             ));
@@ -897,15 +913,19 @@ public class MapsActivity extends FragmentActivity implements
             userLocation = TORONTO;
         }
         // Construct a CameraPosition focusing on userLocation and animate the camera to that position.
-        cameraPosition = new CameraPosition.Builder()
-                .target(userLocation)       // Sets the center of the map to User's location
-                .zoom(17)                   // Sets the zoom
-                .bearing(0)                 // Sets the orientation of the camera to east
-                .tilt(30)                   // Sets the tilt of the camera to 30 degrees
-                .build();                   // Creates a CameraPosition from the builder
-        //Move camera to current location:
-        mMap.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition));
+        if (firstLaunch) {
+            cameraPosition = new CameraPosition.Builder()
+                    .target(userLocation)       // Sets the center of the map to User's location
+                    .zoom(17)                   // Sets the zoom
+                    .bearing(0)                 // Sets the orientation of the camera to east
+                    .tilt(30)                   // Sets the tilt of the camera to 30 degrees
+                    .build();                   // Creates a CameraPosition from the builder
+            //Move camera to current location:
+            mMap.animateCamera(CameraUpdateFactory.newCameraPosition(cameraPosition));
+            firstLaunch = false;
+        }
         bounds = mMap.getProjection().getVisibleRegion().latLngBounds;
+
     }
 
     /*
