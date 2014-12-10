@@ -104,7 +104,7 @@ public class MapsActivity extends FragmentActivity implements
     //TTC info
     ArrayList<TransitRoute> routes = null;
     ArrayList<TransitStop> stops = null;
-    ArrayList<TransitVehicle> vehicles = new ArrayList<TransitVehicle>();
+    ArrayList<TransitVehicle> vehicles = new ArrayList<>();
 
     private GoogleMap mMap; // Might be null if Google Play services APK is not available.
     private SharedPreferences mPrefs;
@@ -137,12 +137,12 @@ public class MapsActivity extends FragmentActivity implements
     public static boolean gotRouteInfo = false;
 
     //Marker list:
-    private HashMap<String, Marker> visibleMarkers = new HashMap<String, Marker>();
-    private HashMap<String, Marker> visibleMarkersVehicle = new HashMap<String, Marker>();
-    private HashMap<String, LatLng> visibleVehicleOldLocation = new HashMap<String, LatLng>();
+    private HashMap<String, Marker> visibleMarkers = new HashMap<>();
+    private HashMap<String, Marker> visibleMarkersVehicle = new HashMap<>();
+    private HashMap<String, LatLng> visibleVehicleOldLocation = new HashMap<>();
 
     //Visible route list:
-    private ArrayList<String> visibleRouteList = new ArrayList<String>();
+    private ArrayList<String> visibleRouteList = new ArrayList<>();
 
     //Runnable vars for updating vehicle locations:
     private static Handler mHandler = new Handler();
@@ -427,9 +427,9 @@ public class MapsActivity extends FragmentActivity implements
     }
     private ArrayList<TransitVehicle> parseVehicleList(XmlPullParser parser) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
-        ArrayList<TransitVehicle> result = new ArrayList<TransitVehicle>();
+        ArrayList<TransitVehicle> result = new ArrayList<>();
         while( eventType!= XmlPullParser.END_DOCUMENT) {
-            String name = null;
+            String name;
             switch(eventType)
             {
                 case XmlPullParser.START_TAG:
@@ -477,9 +477,9 @@ public class MapsActivity extends FragmentActivity implements
     }
     private ArrayList<TransitRoute> parseRouteList(XmlPullParser parser) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
-        ArrayList<TransitRoute> result = new ArrayList<TransitRoute>();
+        ArrayList<TransitRoute> result = new ArrayList<>();
         while( eventType!= XmlPullParser.END_DOCUMENT) {
-            String name = null;
+            String name;
             switch(eventType)
             {
                 case XmlPullParser.START_TAG:
@@ -503,9 +503,9 @@ public class MapsActivity extends FragmentActivity implements
     }
     private ArrayList<TransitStop> parseStopList(XmlPullParser parser) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
-        ArrayList<TransitStop> result = new ArrayList<TransitStop>();
+        ArrayList<TransitStop> result = new ArrayList<>();
         while( eventType!= XmlPullParser.END_DOCUMENT) {
-            String name = null;
+            String name;
             switch(eventType)
             {
                 case XmlPullParser.START_TAG:
@@ -538,9 +538,9 @@ public class MapsActivity extends FragmentActivity implements
     }
     private ArrayList<TransitPrediction> parsePredictions(XmlPullParser parser) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
-        ArrayList<TransitPrediction> result = new ArrayList<TransitPrediction>();
+        ArrayList<TransitPrediction> result = new ArrayList<>();
         while( eventType!= XmlPullParser.END_DOCUMENT) {
-            String name = null;
+            String name;
             switch(eventType)
             {
                 case XmlPullParser.START_TAG:
@@ -582,7 +582,7 @@ public class MapsActivity extends FragmentActivity implements
             String urlString = params[0]; // URL to call
             String command = params[1]; //Which command is being executed
             String resultToDisplay = "";
-            BufferedInputStream in = null;
+            BufferedInputStream in;
             HttpURLConnection urlConnection;
             InputStream input;
 
@@ -663,9 +663,7 @@ public class MapsActivity extends FragmentActivity implements
                 progress.setProgress(99);
                 System.out.println("Number of routes: " + routes.size());
                 //End process data from routeList command
-            } catch (XmlPullParserException e) {
-                e.printStackTrace();
-            } catch (IOException e) {
+            } catch (XmlPullParserException | IOException e) {
                 e.printStackTrace();
             }
             return resultToDisplay;
@@ -696,8 +694,8 @@ public class MapsActivity extends FragmentActivity implements
             String command = "predictions"; //Which command is being executed
             String urlString = apiURL + command + apiAgency + "&stopId=" + stop; // URL to call
             //String resultToDisplay = "";
-            ArrayList<TransitPrediction> results = new ArrayList<TransitPrediction>();
-            BufferedInputStream in = null;
+            ArrayList<TransitPrediction> results = new ArrayList<>();
+            BufferedInputStream in;
 
             Log.i("Executing background API task", "Command is " + command);
 
@@ -724,9 +722,7 @@ public class MapsActivity extends FragmentActivity implements
                 results = parsePredictions(parser);
                 //Add key to results:
                 results.add(new TransitPrediction(key,"KEY"));
-            } catch (XmlPullParserException e) {
-                e.printStackTrace();
-            } catch (IOException e) {
+            } catch (XmlPullParserException | IOException e) {
                 e.printStackTrace();
             }
             //return resultToDisplay;
@@ -742,7 +738,7 @@ public class MapsActivity extends FragmentActivity implements
                 String newSnippet = marker.getSnippet().split("--")[0] + "--" + "Next vehicle(s):";
 
                 //build list of all routes found for this stop:
-                ArrayList<String> stopRoutes = new ArrayList<String>();
+                ArrayList<String> stopRoutes = new ArrayList<>();
                 for (TransitPrediction result : results) {
                     if (!stopRoutes.contains(result.getRoute())) {
                         stopRoutes.add(result.getRoute());
@@ -780,21 +776,20 @@ public class MapsActivity extends FragmentActivity implements
             public void run() {
                 //Set apiParam2 to time:
                 apiParam2 = "&t=0";
-                ArrayList<String> tempRouteList = new ArrayList<String>();
+                ArrayList<String> tempRouteList = new ArrayList<>();
                 while (loopVehicleInfo) {
                     System.out.println("Begin updating vehicle info:");
                     vehicleListBuilt = false;
                     vehicles.clear();
                     //Perform connection, get data, update view:
-                    //for (TransitRoute route : routes) {
                     tempRouteList.clear();
-                    tempRouteList = new ArrayList<String>(visibleRouteList);
+                    tempRouteList = new ArrayList<>(visibleRouteList);
                     for (String id : tempRouteList) {
                         //apiParam1 = "&r=" + route.getRouteId();
                         System.out.println("Getting Vehicles on route: " + id);
                         apiParam1 = "&r=" + id;
                         String urlString = apiURL + apiCommand + apiAgency + apiParam1 + apiParam2; // URL to call (url + command + agency tag + route tag + time (or 0))
-                        BufferedInputStream in = null;
+                        BufferedInputStream in;
 
                         // HTTP Get
                         try {
@@ -822,9 +817,7 @@ public class MapsActivity extends FragmentActivity implements
                             for (TransitVehicle vehicle : tempVehicles) {
                                 vehicles.add(vehicle);
                             }
-                        } catch (XmlPullParserException e) {
-                            e.printStackTrace();
-                        } catch (IOException e) {
+                        } catch (XmlPullParserException | IOException e) {
                             e.printStackTrace();
                         }
                     }
