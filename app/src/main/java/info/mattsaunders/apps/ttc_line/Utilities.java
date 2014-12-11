@@ -34,7 +34,7 @@ public class Utilities {
         BufferedInputStream in = readXMLFile();
         System.out.println("Loading saved TTC route data");
         ArrayList<TransitRoute> results = null;
-        ArrayList<TransitStop> stops = null;
+        ArrayList<TransitStop> stops;
         // Parse XML
         XmlPullParserFactory pullParserFactory;
         try {
@@ -61,9 +61,18 @@ public class Utilities {
                 parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false);
                 parser.setInput(in, null);
 
-                stops = parseStopList(parser);
+                stops = parseStopList(parser, route.getRouteId());
+
+                for (TransitStop stop : stops) {
+                    if (!MapsActivity.masterStopList.containsKey(stop.getStopTag())) {
+                        MapsActivity.masterStopList.put(stop.getStopTag(), stop);
+                    } else {
+                        MapsActivity.masterStopList.get(stop.getStopTag()).setRoutesServed(MapsActivity.masterStopList.get(stop.getStopTag()).getRoutesServed() + "," + route.getRouteId());
+                    }
+                }
+
+
                 route.setStopsList(stops);
-                stops = null;
             }
             System.out.println("----------------Built stops list---------------");
             for (TransitRoute route : results) {
@@ -72,9 +81,7 @@ public class Utilities {
             }
             System.out.println("Number of routes: " + results.size());
             //End process data from saved XML file
-        } catch (XmlPullParserException e) {
-            e.printStackTrace();
-        } catch (IOException e) {
+        } catch (XmlPullParserException | IOException e) {
             e.printStackTrace();
         }
         MapsActivity.gotRouteInfo = true;
@@ -82,9 +89,9 @@ public class Utilities {
     }
     private static ArrayList<TransitRoute> parseRouteList(XmlPullParser parser) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
-        ArrayList<TransitRoute> result = new ArrayList<TransitRoute>();
+        ArrayList<TransitRoute> result = new ArrayList<>();
         while( eventType!= XmlPullParser.END_DOCUMENT) {
-            String name = null;
+            String name;
             switch(eventType)
             {
                 case XmlPullParser.START_TAG:
@@ -106,11 +113,11 @@ public class Utilities {
         } // end while
         return result;
     }
-    private static ArrayList<TransitStop> parseStopList(XmlPullParser parser) throws XmlPullParserException, IOException {
+    private static ArrayList<TransitStop> parseStopList(XmlPullParser parser, String routeId) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
-        ArrayList<TransitStop> result = new ArrayList<TransitStop>();
+        ArrayList<TransitStop> result = new ArrayList<>();
         while( eventType!= XmlPullParser.END_DOCUMENT) {
-            String name = null;
+            String name;
             switch(eventType)
             {
                 case XmlPullParser.START_TAG:
@@ -127,7 +134,7 @@ public class Utilities {
                             TransitStop tempStop = new TransitStop(parser.getAttributeValue(0),
                                     parser.getAttributeValue(1),
                                     new LatLng(Double.parseDouble(parser.getAttributeValue(2)), Double.parseDouble(parser.getAttributeValue(3))),
-                                    stopID); //subway stations don't have this one---parser.getAttributeValue(4)
+                                    stopID, routeId); //subway stations don't have this one---parser.getAttributeValue(4)
 
                             //add new transit route object to list
                             result.add(tempStop);
@@ -150,7 +157,7 @@ public class Utilities {
             File file = new File(dir, FILENAME + FILENAME_EXT);
             FileOutputStream fos = new FileOutputStream(file);
             byte[] buffer = new byte[1024];
-            int n = -1;
+            int n;
             while ( (n = in.read(buffer)) != -1) {
                 fos.write(buffer, 0, n);
             }

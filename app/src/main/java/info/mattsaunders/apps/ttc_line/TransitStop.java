@@ -10,12 +10,14 @@ public class TransitStop {
     private String stopTitle;
     private LatLng location;
     private String stopId;
+    private String routesServed = "";
 
-    public TransitStop(String stopTag, String stopTitle, LatLng location, String stopId) {
+    public TransitStop(String stopTag, String stopTitle, LatLng location, String stopId, String routeId) {
         this.stopTitle = stopTitle;
         this.stopTag = stopTag;
         this.stopId = stopId;
         this.location = location;
+        this.routesServed = routeId;
     }
 
     public String getStopTag(){
@@ -28,4 +30,7 @@ public class TransitStop {
         return location;
     }
     public String getStopTitle() { return stopTitle; }
+    public String getRoutesServed() { return routesServed; }
+
+    public void setRoutesServed(String routesServed) { this.routesServed = routesServed; }
 }

@@ -54,6 +54,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Map;
 
 public class MapsActivity extends FragmentActivity implements
         GoogleApiClient.ConnectionCallbacks,
@@ -70,10 +71,15 @@ public class MapsActivity extends FragmentActivity implements
      * --- use routeTag and stopTag method for calling API to get predictions (currently using stopId method)
      * TODO: research: find out why some stops are included in list, have a valid ID, but don't return predictions
      * --- could be blue night stops possibly -- seems likely but needs more testing
+     * TODO: investigate crash cause: concurrent modification exception from displayVehicles() call in setUpMap()
+     * --- consider removing this call - may slow down updates, but may make app stable
+     * --- try to reproduce error
      *
      * -----------
      * Features:
      * -----------
+     * TODO: draw poly-line connecting Subway stops together, and set different icon for subway stops, clickable to show first and last trains
+     * TODO: remove google-added icons for transit stops and stations
      * TODO: remove or change stops that are inactive (ie blue night stops during daytime)
      * TODO: show vehicle direction in image - with arrow or set flat and rotate icon
      * TODO: change vehicle marker color if vehicle has not moved much over time - ie turn vehicle marker red if vehicle appears to be stuck somewhere
@@ -103,6 +109,7 @@ public class MapsActivity extends FragmentActivity implements
     ArrayList<TransitRoute> routes = null;
     ArrayList<TransitStop> stops = null;
     ArrayList<TransitVehicle> vehicles = new ArrayList<>();
+    static HashMap<String,TransitStop> masterStopList = new HashMap<>();
 
     private GoogleMap mMap; // Might be null if Google Play services APK is not available.
     private SharedPreferences mPrefs;
@@ -420,6 +427,7 @@ public class MapsActivity extends FragmentActivity implements
         //Show dialog:
         dialog.show();
     }
+
     private ArrayList<TransitVehicle> parseVehicleList(XmlPullParser parser) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
         ArrayList<TransitVehicle> result = new ArrayList<>();
@@ -496,7 +504,7 @@ public class MapsActivity extends FragmentActivity implements
         } // end while
         return result;
     }
-    private ArrayList<TransitStop> parseStopList(XmlPullParser parser) throws XmlPullParserException, IOException {
+    private ArrayList<TransitStop> parseStopList(XmlPullParser parser, String routeId) throws XmlPullParserException, IOException {
         int eventType = parser.getEventType();
         ArrayList<TransitStop> result = new ArrayList<>();
         while( eventType!= XmlPullParser.END_DOCUMENT) {
@@ -517,7 +525,7 @@ public class MapsActivity extends FragmentActivity implements
                             TransitStop tempStop = new TransitStop(parser.getAttributeValue(0),
                                     parser.getAttributeValue(1),
                                     new LatLng(Double.parseDouble(parser.getAttributeValue(2)), Double.parseDouble(parser.getAttributeValue(3))),
-                                   stopID); //subway stations don't have this one---parser.getAttributeValue(4)
+                                   stopID, routeId); //subway stations don't have this one---parser.getAttributeValue(4)
 
                             //add new transit route object to list
                             result.add(tempStop);
@@ -646,7 +654,16 @@ public class MapsActivity extends FragmentActivity implements
                     parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false);
                     parser.setInput(in, null);
 
-                    stops = parseStopList(parser);
+                    stops = parseStopList(parser, route.getRouteId());
+
+                    for (TransitStop stop : stops) {
+                        if (!masterStopList.containsKey(stop.getStopTag())) {
+                            masterStopList.put(stop.getStopTag(),stop);
+                        } else {
+                            masterStopList.get(stop.getStopTag()).setRoutesServed(masterStopList.get(stop.getStopTag()).getRoutesServed() + "," + route.getRouteId());
+                        }
+                    }
+
                     route.setStopsList(stops);
                     stops = null;
                 }
@@ -660,6 +677,9 @@ public class MapsActivity extends FragmentActivity implements
                 //End process data from routeList command
             } catch (XmlPullParserException | IOException e) {
                 e.printStackTrace();
+            }
+            for (Map.Entry<String, TransitStop> masterListEntry : masterStopList.entrySet()) {
+                System.out.println("BUILT MASTER STOP LIST: " + masterListEntry.getKey() + " " + masterListEntry.getValue().getStopTitle() + " serves: " + masterListEntry.getValue().getRoutesServed());
             }
             return resultToDisplay;
         }
@@ -750,7 +770,7 @@ public class MapsActivity extends FragmentActivity implements
                     }
                     newSnippet += "minutes";
                 }
-                if (results.size() < 1) { newSnippet += "\n" + "NOT IN SERVICE"; }
+                if (results.size() < 1) { newSnippet += "\n" + "NO PREDICTIONS \nNOT IN SERVICE"; }
                 marker.setSnippet(newSnippet);
                 marker.hideInfoWindow();
                 marker.showInfoWindow();
@@ -842,32 +862,43 @@ public class MapsActivity extends FragmentActivity implements
         float zoom = mMap.getCameraPosition().zoom;
         visibleRouteList.clear();
         if (zoom > 14.5) {
-            for (TransitRoute route : routes) {
-                stops = route.getStopsList();
-                for (TransitStop stop : stops) {
+//            for (TransitRoute route : routes) {
+//                stops = route.getStopsList();
+//                for (TransitStop stop : stops) {
+            for (Map.Entry<String, TransitStop> masterListEntry : masterStopList.entrySet()) {
+                TransitStop stop = masterListEntry.getValue();
                     LatLng stopLoc = stop.getLocation();
                     if (bounds.contains(stopLoc)) {
-                        if (stop.getStopTag().split("_").length > 1) {  //Skip displaying stop if it's an _ar stop (allows the one underneath to show) (some don't have one underneath - these edge cases need to be dealt with)
+                        //Skip displaying stop if it's an _ar stop (allows the one underneath to show) (some don't have one underneath - these edge cases need to be dealt with)
+                        //Consider replacing this with if (stop.getStopId().equals("0") { break; } to guarantee no illegitimate stops are shown (at risk of removing stops that should exist)
+                        if (stop.getStopTag().split("_").length > 1) {
                             System.out.println("Found an _ in " + stop.getStopTag() + " with id: " + stop.getStopId() + " called " + stop.getStopTitle());
-                            break;
-                        } //Consider replacing this with if (stop.getStopId().equals("0") { break; } to guarantee no illegitimate stops are shown (at risk of removing stops that should exist)
+                            if (masterStopList.containsKey(stop.getStopTag().split("_")[0])) {
+                                if (stop.getStopTag().split("_")[1].equals("ar")) {
+                                    break;
+                                }
+                            }
+                        }
                         if (!visibleMarkers.containsKey(stop.getStopTag())) {
                             visibleMarkers.put(stop.getStopTag(), mMap.addMarker(new MarkerOptions()
                                             .position(stopLoc)
                                             .title(stop.getStopTitle() + " - " + stop.getStopTag())
-                                            .flat(true)
+                                            //.flat(true)
                                             .snippet(stop.getStopId())
                                             .icon(BitmapDescriptorFactory.fromResource(R.drawable.stop))
                             ));
                         }
-                        if (!visibleRouteList.contains(route.getRouteId())) { visibleRouteList.add(route.getRouteId()); }
+//                        if (!visibleRouteList.contains(route.getRouteId())) { visibleRouteList.add(route.getRouteId()); }
+                        for (String routeId : stop.getRoutesServed().split(",")) {
+                            if (!visibleRouteList.contains(routeId)) { visibleRouteList.add(routeId); }
+                        }
                     } else if (visibleMarkers.containsKey(stop.getStopTag())) { //if not visible, check if already displayed
                         //System.out.println("Removing marker " + stop.getStopTitle() + " at " + stop.getLocation());
                         visibleMarkers.get(stop.getStopTag()).remove(); //remove marker from map
                         visibleMarkers.remove(stop.getStopTag()); //remove marker from hash map of markers
                     }
                 }
-            }
+//            }
         } else { mMap.clear(); }
     }
     private void displayVehicles() {
@@ -1007,10 +1038,7 @@ public class MapsActivity extends FragmentActivity implements
                     bounds = mMap.getProjection().getVisibleRegion().latLngBounds;
                     //Log.i("Camera bounds", "Area shown " + bounds.toString());
                     if (gotRouteInfo) {
-                        if (vehicleListBuilt) { displayVehicles(); }
-                        //mMap.clear();
-                        //visibleMarkersVehicle.clear();
-                        //visibleMarkers.clear();
+                        if (vehicleListBuilt) { displayVehicles(); } // this is possibly problematic - concurrent modification exception - caused a crash
                         displayStops();
                     }
                 }
@@ -1027,7 +1055,6 @@ public class MapsActivity extends FragmentActivity implements
                         String id = marker.getSnippet().split("--")[0];
                         System.out.println("Marker has id # " + id);
                         //Get predictions for stop
-                        //ArrayList<String> predictions =
                         new CallAPIForPrediction().execute(id,key);
                     }
                     return true;
